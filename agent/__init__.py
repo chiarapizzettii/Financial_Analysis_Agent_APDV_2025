@@ -1,7 +1,9 @@
 import os
-from typing import List, Optional, Union
+import json
+from typing import List, Optional
 import polars as pl
-from llama_cpp import Llama
+
+import ollama
 
 from tools.calculations import (
     yoy_growth,
@@ -13,6 +15,7 @@ from tools.calculations import (
     flag_invalid_values,
     flag_anomalous_margin,
 )
+
 from tools.plotting import (
     create_plotter,
     plot_revenue_trend,
@@ -25,118 +28,84 @@ from tools.plotting import (
     plot_revenue_vs_netincome,
 )
 
-class FinancialAgent:
-    """
-    AI-ready financial analysis agent.
-    Handles database connection, calculations, and plotting.
-    """
 
+class FinancialAgent:
     def __init__(self, db_path: Optional[str] = None, llm_model: str = "mistral"):
         if db_path is None:
             db_path = os.path.join("data", "finance.db")
+
         self.db_path = db_path
         self.plotter = create_plotter(db_path)
+        self.llm_model = llm_model
 
-
-
-        # Initialize LLM
-        from llama_cpp import Llama
-        self.llm = Llama(model_path=model_path)
-        self.prompt_prefix = (
-            "You are a financial analysis assistant. You can use the following tools:\n"
-            "- Calculations: margins, growth, share, indexing, anomaly detection\n"
-            "- Plotting: revenue trends, net income trends, profitability, dashboards, comparisons, correlations\n"
-            "- Database access: financials and ratios tables\n"
-            "When given a question, respond with a structured plan indicating which tools to use "
-            "and the expected output (plot or summary)."
+        self.system_prompt = (
+            "You are a senior financial analyst AI.\n"
+            "You convert financial questions into structured analysis plans.\n\n"
+            "TOOLS AVAILABLE:\n"
+            "- Financial calculations (growth, margins, shares)\n"
+            "- Time-series analysis\n"
+            "- Financial plots and dashboards\n"
+            "- SQLite financial database\n\n"
+            "When answering:\n"
+            "1. Explain briefly what the user wants\n"
+            "2. Output a structured plan (steps + tools)\n"
+            "3. Do NOT fabricate data\n"
         )
 
     # -------------------
     # Data Loading
     # -------------------
     def load_financials(self, company_ids: Optional[List[int]] = None) -> pl.DataFrame:
-        """
-        Load financial data from DB into a Polars DataFrame.
-        """
-        df = pl.read_database(
-            "SELECT * FROM financials" + (
-                f" WHERE company_id IN ({','.join(map(str, company_ids))})"
-                if company_ids else ""
-            ),
-            conn=None,
-            db_path=self.db_path
-        )
-        return df
+        query = "SELECT * FROM financials"
+        if company_ids:
+            query += f" WHERE company_id IN ({','.join(map(str, company_ids))})"
+        return pl.read_database(query, self.db_path)
 
     def load_ratios(self, company_ids: Optional[List[int]] = None) -> pl.DataFrame:
-        """
-        Load ratios data from DB.
-        """
-        df = pl.read_database(
-            "SELECT * FROM ratios" + (
-                f" WHERE company_id IN ({','.join(map(str, company_ids))})"
-                if company_ids else ""
-            ),
-            conn=None,
-            db_path=self.db_path
-        )
-        return df
+        query = "SELECT * FROM ratios"
+        if company_ids:
+            query += f" WHERE company_id IN ({','.join(map(str, company_ids))})"
+        return pl.read_database(query, self.db_path)
 
     # -------------------
     # Calculations
     # -------------------
     def calculate_margins(self, df: pl.DataFrame) -> pl.DataFrame:
-        """
-        Example: compute standard margins and add them to DataFrame.
-        """
         df = compute_margin(df, "net_income", "revenue", "net_margin")
-        df = compute_margin(df, "operating_income", "revenue", "operating_margin")
-        df = compute_margin(df, "gross_profit", "revenue", "gross_margin")
         df = flag_invalid_values(df, ["revenue", "net_income"])
         df = flag_anomalous_margin(df, "net_income", "revenue")
         return df
 
     def calculate_growth(self, df: pl.DataFrame, value_col: str) -> pl.DataFrame:
-        """
-        Add YoY and period growth to DataFrame.
-        """
         df = yoy_growth(df, value_col, periods=1, output_col=f"{value_col}_yoy")
-        df = period_growth(df, value_col, periods=1, output_col=f"{value_col}_mom")
+        df = period_growth(df, value_col, periods=1, output_col=f"{value_col}_period")
         return df
 
     # -------------------
-    # Plotting
+    # LLM-driven interface
     # -------------------
-    def plot_revenue(self, company_ids: Optional[List[int]] = None) -> 'go.Figure':
-        return plot_revenue_trend([], company_ids=company_ids, db_path=self.db_path)
-
-    def plot_net_income(self, company_ids: Optional[List[int]] = None) -> 'go.Figure':
-        return plot_net_income_trend([], company_ids=company_ids, db_path=self.db_path)
-
-    def plot_ratios(self, company_ids: Optional[List[int]] = None) -> 'go.Figure':
-        return plot_profitability([], company_ids=company_ids, db_path=self.db_path)
-
-    def plot_dashboard_for_company(self, company_id: int, year: int) -> 'go.Figure':
-        return plot_dashboard(company_id, year, db_path=self.db_path)
-
-    # -------------------
-    # LLM-driven agent interface
-    # -------------------
-    def answer_question(self, question: str):
-        """
-        Use LLM to convert a natural language question into a structured plan.
-        Returns a JSON-like plan of actions and outputs.
-        """
-        full_prompt = f"{self.prompt_prefix}\nQuestion: {question}\nResponse:"
-        response = self.llm(
-            full_prompt,
-            max_tokens=8192,  # high for local model
-            temperature=0.0
+    def answer_question(self, question: str) -> str:
+        response = ollama.chat(
+            model=self.llm_model,
+            messages=[
+                {"role": "system", "content": self.system_prompt},
+                {"role": "user", "content": question},
+            ],
+            options={
+                "temperature": 0.0,
+                "num_ctx": 8192  # ← THIS is how you get "limitless" context
+            }
         )
-        return response["choices"][0]["text"]
+
+        return response["message"]["content"]
+
+
 
 # -------------------
 # Convenience function
 # -------------------
-def create_agent(db_path: Optional[str] = None, llm_model: str = "mistral") -> FinancialAgent:
+def create_agent(
+    db_path: Optional[str] = None,
+    llm_model: str = "mistral",
+) -> FinancialAgent:
     return FinancialAgent(db_path=db_path, llm_model=llm_model)
