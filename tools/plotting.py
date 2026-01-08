@@ -1,10 +1,11 @@
 """
 Financial Analysis Plotting Tools using Plotly and Polars
+Uses normalized tables (companies, financials, ratios) with proper joins
 Handles missing values and provides interactive visualizations
 """
 
 import sqlite3
-from typing import Any, Dict, List, Optional
+from typing import List, Optional
 
 import plotly.express as px
 import plotly.graph_objects as go
@@ -43,12 +44,14 @@ class FinancialPlotter:
             start_year: Starting year (optional)
             end_year: Ending year (optional)
         """
-        # Build query with optional year filters
+
         year_filter = ""
         if start_year:
             year_filter += f" AND year >= {start_year}"
+            year_filter += f" AND f.year >= {start_year}"
         if end_year:
-            year_filter += f" AND year <= {end_year}"
+            year_filter += f" AND year <= {start_year}"
+            year_filter += f" AND f.year <= {end_year}"
 
         query = f"""
         SELECT
@@ -68,16 +71,17 @@ class FinancialPlotter:
 
         for company_id in company_ids:
             company_data = df.filter(pl.col("company_id") == company_id)
-            fig.add_trace(
-                go.Scatter(
-                    x=company_data["year"],
-                    y=company_data["revenue"],
-                    mode="lines+markers",
-                    name=f"Company {company_id}",
-                    line=dict(width=2),
-                    marker=dict(size=8),
+            if len(company_data) > 0:
+                fig.add_trace(
+                    go.Scatter(
+                        x=company_data["year"],
+                        y=company_data["revenue"],
+                        mode="lines+markers",
+                        name=f"Company {company_id}",
+                        line=dict(width=2),
+                        marker=dict(size=8),
+                    )
                 )
-            )
 
         fig.update_layout(
             title="Revenue Trend Over Time",
@@ -140,19 +144,20 @@ class FinancialPlotter:
             for company_id in company_ids:
                 company_data = df_clean.filter(pl.col("company_id") == company_id)
 
-                fig.add_trace(
-                    go.Scatter(
-                        x=company_data["year"],
-                        y=company_data[metric],
-                        mode="lines+markers",
-                        name=f"Company {company_id}",
-                        showlegend=(idx == 1),  # Only show legend on first plot
-                        line=dict(width=2),
-                        marker=dict(size=6),
-                    ),
-                    row=idx,
-                    col=1,
-                )
+                if len(company_data) > 0:
+                    fig.add_trace(
+                        go.Scatter(
+                            x=company_data["year"],
+                            y=company_data[metric],
+                            mode="lines+markers",
+                            name=f"Company {company_id}",
+                            showlegend=(idx == 1),
+                            line=dict(width=2),
+                            marker=dict(size=6),
+                        ),
+                        row=idx,
+                        col=1,
+                    )
 
         fig.update_xaxes(title_text="Year", row=3, col=1)
         fig.update_yaxes(title_text="Ratio", row=1, col=1)
@@ -163,49 +168,103 @@ class FinancialPlotter:
 
         return fig
 
+    def plot_net_income_trend(
+        self,
+        company_ids: List[int],
+        start_year: Optional[int] = None,
+        end_year: Optional[int] = None,
+    ) -> go.Figure:
+        """
+        Plot net income trend over time
+        """
+        year_filter = ""
+        if start_year:
+            year_filter += f" AND f.year >= {start_year}"
+        if end_year:
+            year_filter += f" AND f.year <= {end_year}"
+
+        query = f"""
+        SELECT
+            f.company_id,
+            f.year,
+            f.net_income
+        FROM financials f
+        WHERE f.company_id IN ({",".join(map(str, company_ids))})
+        {year_filter}
+        ORDER BY f.company_id, f.year
+        """
+
+        df = self._query_to_df(query)
+        df = self._handle_missing(df, ["net_income"])
+
+        fig = go.Figure()
+
+        for company_id in company_ids:
+            company_data = df.filter(pl.col("company_id") == company_id)
+            if len(company_data) > 0:
+                fig.add_trace(
+                    go.Scatter(
+                        x=company_data["year"],
+                        y=company_data["net_income"],
+                        mode="lines+markers",
+                        name=f"Company {company_id}",
+                        line=dict(width=2),
+                        marker=dict(size=8),
+                    )
+                )
+
+        fig.update_layout(
+            title="Net Income Trend Over Time",
+            xaxis_title="Year",
+            yaxis_title="Net Income",
+            hovermode="x unified",
+            template="plotly_white",
+            legend=dict(yanchor="top", y=0.99, xanchor="left", x=0.01),
+        )
+
+        return fig
+
     def plot_company_comparison(
         self, company_ids: List[int], metric: str, year: int
     ) -> go.Figure:
         """
         Compare companies on a specific metric for a given year
-
-        Args:
-            company_ids: List of company IDs
-            metric: Metric to compare (e.g., 'revenue', 'net_income', 'roe')
-            year: Year for comparison
         """
-        # Determine which table contains the metric
-        financial_metrics = [
+        financials_metrics = [
             "revenue",
             "net_income",
             "total_assets",
             "total_liabilities",
             "equity",
         ]
+        ratios_metrics = ["net_margin", "roa", "roe", "asset_leverage"]
 
-        if metric in financial_metrics:
-            query = f"""
-            SELECT
-                f.company_id,
-                f.{metric}
-            FROM financials f
-            WHERE f.company_id IN ({",".join(map(str, company_ids))})
-            AND f.year = {year}
-            """
+        if metric in financials_metrics:
+            table = "financials"
+        elif metric in ratios_metrics:
+            table = "ratios"
         else:
-            query = f"""
-            SELECT
-                r.company_id,
-                r.{metric}
-            FROM ratios r
-            WHERE r.company_id IN ({",".join(map(str, company_ids))})
-            AND r.year = {year}
-            """
+            raise ValueError(
+                f"Unknown metric: {metric}. Must be one of {financials_metrics + ratios_metrics}"
+            )
+
+        query = f"""
+        SELECT
+            company_id,
+            {metric}
+        FROM {table}
+        WHERE company_id IN ({",".join(map(str, company_ids))})
+        AND year = {year}
+        """
 
         df = self._query_to_df(query)
         df = self._handle_missing(df, [metric])
 
-        # Create bar chart
+        if len(df) == 0:
+            raise ValueError(
+                f"No data found for the specified companies in year {year}"
+            )
+
         fig = go.Figure(
             data=[
                 go.Bar(
@@ -250,13 +309,28 @@ class FinancialPlotter:
         """
 
         industry_df = self._query_to_df(industry_query)
+
+        if len(industry_df) == 0:
+            raise ValueError(f"Company {company_id} not found in companies table")
+
         industry_code = industry_df[industry_col][0]
 
-        # Determine table
-        financial_metrics = ["revenue", "net_income", "total_assets"]
-        table = "financials" if metric in financial_metrics else "ratios"
+        financials_metrics = [
+            "revenue",
+            "net_income",
+            "total_assets",
+            "total_liabilities",
+            "equity",
+        ]
+        ratios_metrics = ["net_margin", "roa", "roe", "asset_leverage"]
 
-        # Get company value and industry average
+        if metric in financials_metrics:
+            table = "financials"
+        elif metric in ratios_metrics:
+            table = "ratios"
+        else:
+            raise ValueError(f"Unknown metric: {metric}")
+
         query = f"""
         SELECT
             c.company_id,
@@ -264,19 +338,27 @@ class FinancialPlotter:
             c.{industry_col}
         FROM {table} t
         JOIN companies c ON t.company_id = c.company_id
-        WHERE c.{industry_col} = {industry_code}
+        WHERE c.{industry_col} = '{industry_code}'
         AND t.year = {year}
         """
 
         df = self._query_to_df(query)
         df = self._handle_missing(df, [metric])
 
-        # Calculate statistics
-        company_value = df.filter(pl.col("company_id") == company_id)[metric][0]
+        if len(df) == 0:
+            raise ValueError(
+                f"No data found for industry {industry_code} in year {year}"
+            )
+
+        company_data = df.filter(pl.col("company_id") == company_id)
+
+        if len(company_data) == 0:
+            raise ValueError(f"No data found for company {company_id} in year {year}")
+
+        company_value = company_data[metric][0]
         industry_avg = df[metric].mean()
         industry_median = df[metric].median()
 
-        # Create comparison chart
         fig = go.Figure(
             data=[
                 go.Bar(
@@ -313,28 +395,46 @@ class FinancialPlotter:
         """
         year_filter = ""
         if start_year:
-            year_filter += f" AND f.year >= {start_year}"
+            year_filter += f" AND year >= {start_year}"
         if end_year:
-            year_filter += f" AND f.year <= {end_year}"
+            year_filter += f" AND year <= {end_year}"
 
-        # Build query dynamically based on metrics
-        metric_cols = ", ".join([f"r.{m}" for m in metrics])
+        financials_metrics = [
+            "revenue",
+            "net_income",
+            "total_assets",
+            "total_liabilities",
+            "equity",
+        ]
+        ratios_metrics = ["net_margin", "roa", "roe", "asset_leverage"]
+
+        all_financials = all(m in financials_metrics for m in metrics)
+        all_ratios = all(m in ratios_metrics for m in metrics)
+
+        if not (all_financials or all_ratios):
+            raise ValueError(
+                "All metrics must be from the same table (either financials or ratios)"
+            )
+
+        table = "financials" if all_financials else "ratios"
+        metric_cols = ", ".join(metrics)
 
         query = f"""
         SELECT
             {metric_cols}
-        FROM ratios r
-        WHERE r.company_id IN ({",".join(map(str, company_ids))})
+        FROM {table}
+        WHERE company_id IN ({",".join(map(str, company_ids))})
         {year_filter}
         """
 
         df = self._query_to_df(query)
         df = self._handle_missing(df, metrics)
 
-        # Calculate correlation matrix
+        if len(df) < 2:
+            raise ValueError("Not enough data points to calculate correlations")
+
         corr_matrix = df.corr()
 
-        # Create heatmap
         fig = go.Figure(
             data=go.Heatmap(
                 z=corr_matrix.to_numpy(),
@@ -352,8 +452,8 @@ class FinancialPlotter:
         fig.update_layout(
             title="Correlation Matrix of Financial Metrics",
             template="plotly_white",
-            width=600,
-            height=600,
+            width=700,
+            height=700,
         )
 
         return fig
@@ -384,7 +484,6 @@ class FinancialPlotter:
         if len(df) == 0:
             raise ValueError(f"No data found for company {company_id} in year {year}")
 
-        # Create subplots
         fig = make_subplots(
             rows=2,
             cols=2,
@@ -406,6 +505,8 @@ class FinancialPlotter:
                 x=["Revenue", "Net Income"],
                 y=[df["revenue"][0], df["net_income"][0]],
                 marker_color=["lightblue", "lightgreen"],
+                text=[f"{df['revenue'][0]:.2f}", f"{df['net_income'][0]:.2f}"],
+                textposition="auto",
                 name="P&L",
             ),
             row=1,
@@ -418,6 +519,12 @@ class FinancialPlotter:
                 x=["ROE", "ROA", "Net Margin"],
                 y=[df["roe"][0], df["roa"][0], df["net_margin"][0]],
                 marker_color="orange",
+                text=[
+                    f"{df['roe'][0]:.2f}",
+                    f"{df['roa'][0]:.2f}",
+                    f"{df['net_margin'][0]:.2f}",
+                ],
+                textposition="auto",
                 name="Ratios",
             ),
             row=1,
@@ -468,59 +575,163 @@ class FinancialPlotter:
 
         return fig
 
+    def plot_revenue_vs_netincome(
+        self,
+        company_ids: List[int],
+        start_year: Optional[int] = None,
+        end_year: Optional[int] = None,
+    ) -> go.Figure:
+        """
+        Plot revenue and net income on same chart with dual y-axes
+        """
+        year_filter = ""
+        if start_year:
+            year_filter += f" AND f.year >= {start_year}"
+        if end_year:
+            year_filter += f" AND f.year <= {end_year}"
 
-# Example usage functions for the agent to call
-def create_plotter(db_path: str = "financial_data.db") -> FinancialPlotter:
+        query = f"""
+        SELECT
+            f.company_id,
+            f.year,
+            f.revenue,
+            f.net_income
+        FROM financials f
+        WHERE f.company_id IN ({",".join(map(str, company_ids))})
+        {year_filter}
+        ORDER BY f.company_id, f.year
+        """
+
+        df = self._query_to_df(query)
+        df = self._handle_missing(df, ["revenue", "net_income"])
+
+        fig = make_subplots(specs=[[{"secondary_y": True}]])
+
+        for company_id in company_ids:
+            company_data = df.filter(pl.col("company_id") == company_id)
+
+            if len(company_data) > 0:
+                # Revenue on primary y-axis
+                fig.add_trace(
+                    go.Scatter(
+                        x=company_data["year"],
+                        y=company_data["revenue"],
+                        mode="lines+markers",
+                        name=f"Company {company_id} - Revenue",
+                        line=dict(width=2),
+                    ),
+                    secondary_y=False,
+                )
+
+                # Net Income on secondary y-axis
+                fig.add_trace(
+                    go.Scatter(
+                        x=company_data["year"],
+                        y=company_data["net_income"],
+                        mode="lines+markers",
+                        name=f"Company {company_id} - Net Income",
+                        line=dict(width=2, dash="dash"),
+                    ),
+                    secondary_y=True,
+                )
+
+        fig.update_xaxes(title_text="Year")
+        fig.update_yaxes(title_text="Revenue", secondary_y=False)
+        fig.update_yaxes(title_text="Net Income", secondary_y=True)
+
+        fig.update_layout(
+            title="Revenue vs Net Income Over Time",
+            hovermode="x unified",
+            template="plotly_white",
+            legend=dict(yanchor="top", y=0.99, xanchor="left", x=0.01),
+        )
+
+        return fig
+
+
+# Convenience functions for agent tool calling
+def create_plotter(db_path: str = "finance.db") -> FinancialPlotter:
     """Initialize the plotter with database path"""
     return FinancialPlotter(db_path)
 
 
-# Convenience functions for agent tool calling
 def plot_revenue_trend(
     company_ids: List[int],
-    start_year: int = None,
-    end_year: int = None,
-    db_path: str = "financial_data.db",
+    start_year: Optional[int] = None,
+    end_year: Optional[int] = None,
+    db_path: str = "finance.db",
 ):
+    """Plot revenue trends over time from financials table"""
     plotter = create_plotter(db_path)
     return plotter.plot_revenue_trend(company_ids, start_year, end_year)
 
 
+def plot_net_income_trend(
+    company_ids: List[int],
+    start_year: Optional[int] = None,
+    end_year: Optional[int] = None,
+    db_path: str = "finance.db",
+):
+    """Plot net income trends over time from financials table"""
+    plotter = create_plotter(db_path)
+    return plotter.plot_net_income_trend(company_ids, start_year, end_year)
+
+
 def plot_profitability(
     company_ids: List[int],
-    start_year: int = None,
-    end_year: int = None,
-    db_path: str = "financial_data.db",
+    start_year: Optional[int] = None,
+    end_year: Optional[int] = None,
+    db_path: str = "finance.db",
 ):
+    """Plot profitability ratios (ROE, ROA, Net Margin) from ratios table"""
     plotter = create_plotter(db_path)
     return plotter.plot_profitability_ratios(company_ids, start_year, end_year)
 
 
 def plot_comparison(
-    company_ids: List[int], metric: str, year: int, db_path: str = "financial_data.db"
+    company_ids: List[int], metric: str, year: int, db_path: str = "finance.db"
 ):
+    """Compare companies on a specific metric (auto-detects correct table)"""
     plotter = create_plotter(db_path)
     return plotter.plot_company_comparison(company_ids, metric, year)
 
 
 def plot_industry_benchmark(
-    company_id: int, metric: str, year: int, db_path: str = "financial_data.db"
+    company_id: int,
+    metric: str,
+    year: int,
+    industry_level: str = "level6",
+    db_path: str = "finance.db",
 ):
+    """Compare company against industry benchmarks (uses JOIN with companies table)"""
     plotter = create_plotter(db_path)
-    return plotter.plot_industry_benchmark(company_id, metric, year)
+    return plotter.plot_industry_benchmark(company_id, metric, year, industry_level)
 
 
 def plot_correlation(
     company_ids: List[int],
     metrics: List[str],
-    start_year: int = None,
-    end_year: int = None,
-    db_path: str = "financial_data.db",
+    start_year: Optional[int] = None,
+    end_year: Optional[int] = None,
+    db_path: str = "finance.db",
 ):
+    """Plot correlation heatmap between metrics (all from same table)"""
     plotter = create_plotter(db_path)
     return plotter.plot_correlation_heatmap(company_ids, metrics, start_year, end_year)
 
 
-def plot_dashboard(company_id: int, year: int, db_path: str = "financial_data.db"):
+def plot_dashboard(company_id: int, year: int, db_path: str = "finance.db"):
+    """Create comprehensive financial health dashboard (JOINs financials + ratios)"""
     plotter = create_plotter(db_path)
     return plotter.plot_financial_health_dashboard(company_id, year)
+
+
+def plot_revenue_vs_netincome(
+    company_ids: List[int],
+    start_year: Optional[int] = None,
+    end_year: Optional[int] = None,
+    db_path: str = "finance.db",
+):
+    """Plot revenue and net income with dual y-axes from financials table"""
+    plotter = create_plotter(db_path)
+    return plotter.plot_revenue_vs_netincome(company_ids, start_year, end_year)
