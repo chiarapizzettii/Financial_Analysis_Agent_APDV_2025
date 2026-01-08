@@ -2,229 +2,283 @@ import sqlite3
 
 import polars as pl
 
-DB_PATH = "finance.db"
+DB_PATH = "./finance.db"
 
 # -----------------------------
-# 1. LOAD THE RAW TABLE WITH EXPLICIT SCHEMA
+# 1. CONNECT + READ WITH SAFE SCHEMA
 # -----------------------------
 conn = sqlite3.connect(DB_PATH)
+conn.execute("PRAGMA foreign_keys = ON")
 
-# Get column names and types from SQLite to respect the existing schema
 cursor = conn.cursor()
 cursor.execute("PRAGMA table_info(financial_records)")
 columns_info = cursor.fetchall()
 
-# Build schema mapping to prevent any type corruption
 schema_overrides = {}
-for col in columns_info:
-    col_name = col[1]
-    sql_type = col[2].upper()
-
-    # Skip the auto-increment primary key
-    if col_name == "record_id":
-        continue
-
+for _, name, sql_type, *_ in columns_info:
+    sql_type = sql_type.upper()
     if "INT" in sql_type:
-        schema_overrides[col_name] = pl.Int64
-    elif "REAL" in sql_type or "FLOAT" in sql_type:
-        schema_overrides[col_name] = pl.Float64
+        schema_overrides[name] = pl.Int64
+    elif "REAL" in sql_type:
+        schema_overrides[name] = pl.Float64
     else:
-        schema_overrides[col_name] = pl.Utf8
+        schema_overrides[name] = pl.Utf8
 
-# Read with explicit schema to ensure 0 corruption
 df = pl.read_database(
     "SELECT * FROM financial_records",
     connection=conn,
     schema_overrides=schema_overrides,
 )
 
-print(f"Loaded {df.height} rows from financial_records")
-
-
-# -----------------------------
-# HELPER FUNCTION TO WRITE DATAFRAME TO SQLITE
-# -----------------------------
-def write_table_to_sqlite(df, table_name, conn):
-    """Write a Polars DataFrame to SQLite using only sqlite3"""
-    cursor = conn.cursor()
-
-    # Build CREATE TABLE statement
-    def polars_to_sql(dtype):
-        if dtype in (pl.Int64, pl.Int32, pl.Int16, pl.Int8):
-            return "INTEGER"
-        if dtype in (pl.Float64, pl.Float32):
-            return "REAL"
-        return "TEXT"
-
-    columns_sql = [
-        f'"{name}" {polars_to_sql(dtype)}' for name, dtype in df.schema.items()
-    ]
-    create_sql = f"CREATE TABLE {table_name} ({', '.join(columns_sql)})"
-
-    cursor.execute(create_sql)
-
-    # Insert data
-    rows = df.to_dicts()
-    placeholders = ", ".join(["?"] * len(df.columns))
-    columns = ", ".join([f'"{c}"' for c in df.columns])
-    insert_sql = f"INSERT INTO {table_name} ({columns}) VALUES ({placeholders})"
-
-    cursor.executemany(insert_sql, [tuple(row.values()) for row in rows])
-    conn.commit()
-
+print("=" * 60)
+print("📥 DATA LOAD")
+print("=" * 60)
+print(f"Loaded {df.height} rows")
+print("Schema:")
+for k, v in df.schema.items():
+    print(f"  {k}: {v}")
 
 # -----------------------------
 # 2. CREATE COMPANIES TABLE
 # -----------------------------
-# Unique companies
 companies = df.select(
     [
-        pl.col("expediente").alias("company_id"),
-        pl.col("tamaño_e").alias("size_category"),
-        pl.col("cia_imvalores").alias("is_public"),
+        "company_id",
+        "company_size",
+        "is_public",
+        "segment_code",
+        "industry_code_level1",
+        "industry_code_level6",
     ]
 ).unique(subset=["company_id"])
 
+print("\n" + "=" * 60)
+print("🏢 COMPANIES TABLE")
+print("=" * 60)
 print(f"Unique companies: {companies.height}")
 
-# Drop and create companies table
 conn.execute("DROP TABLE IF EXISTS companies")
-conn.commit()
-write_table_to_sqlite(companies, "companies", conn)
-print("companies table created")
+conn.execute(
+    """
+    CREATE TABLE companies (
+        company_id INTEGER PRIMARY KEY,
+        company_size INTEGER,
+        is_public INTEGER,
+        segment_code INTEGER,
+        industry_code_level1 INTEGER,
+        industry_code_level6 INTEGER
+    )
+    """
+)
+
+conn.executemany(
+    "INSERT INTO companies VALUES (?, ?, ?, ?, ?, ?)",
+    companies.to_numpy().tolist(),
+)
+
+conn.execute("CREATE INDEX idx_companies_size ON companies(company_size)")
+conn.execute("CREATE INDEX idx_companies_industry ON companies(industry_code_level6)")
+
+print("✅ companies table created with indexes")
 
 # -----------------------------
 # 3. CREATE FINANCIALS TABLE
 # -----------------------------
-financial_cols = [
-    "expediente",  # company_id
-    "anio",  # year
-    "posicion_general",  # ranking
-    "id_estado_financiero",  # statement_id
-    "ingresos_ventas",
-    "utilidad_neta",
-    "activos",
-    "pasivo",
-]
-
-financials = df.select(financial_cols).rename(
-    {
-        "expediente": "company_id",
-        "anio": "year",
-        "posicion_general": "ranking",
-        "id_estado_financiero": "statement_id",
-        "ingresos_ventas": "revenue",
-        "utilidad_neta": "net_income",
-        "activos": "total_assets",
-        "pasivo": "total_liabilities",
-    }
+financials = df.select(
+    [
+        "company_id",
+        "year",
+        "ranking",
+        "statement_id",
+        "revenue",
+        "net_income",
+        "total_assets",
+        "total_liabilities",
+        "equity",
+    ]
 )
+
+print("\n" + "=" * 60)
+print("📊 FINANCIALS TABLE")
+print("=" * 60)
+print(f"Financial rows: {financials.height}")
 
 conn.execute("DROP TABLE IF EXISTS financials")
-conn.commit()
-write_table_to_sqlite(financials, "financials", conn)
-print("financials table created")
-
-# -----------------------------
-# 4. CREATE RATIOS TABLE
-# -----------------------------
-ratio_cols = ["expediente", "anio", "rot_ventas", "rot_cartera", "impac_carga_finan"]
-
-ratios = df.select(ratio_cols).rename(
-    {
-        "expediente": "company_id",
-        "anio": "year",
-        "rot_ventas": "rot_ventas",
-        "rot_cartera": "rot_cartera",
-        "impac_carga_finan": "impacto_carga",
-    }
+conn.execute(
+    """
+    CREATE TABLE financials (
+        company_id INTEGER,
+        year INTEGER,
+        ranking INTEGER,
+        statement_id INTEGER,
+        revenue REAL,
+        net_income REAL,
+        total_assets REAL,
+        total_liabilities REAL,
+        equity REAL,
+        PRIMARY KEY (company_id, year),
+        FOREIGN KEY (company_id) REFERENCES companies(company_id)
+    )
+    """
 )
 
-conn.execute("DROP TABLE IF EXISTS ratios")
-conn.commit()
-write_table_to_sqlite(ratios, "ratios", conn)
-print("ratios table created")
-
-# -----------------------------
-# 5. COMPREHENSIVE SANITY CHECKS
-# -----------------------------
-print("\n" + "=" * 50)
-print("RUNNING SANITY CHECKS")
-print("=" * 50)
-
-# 5a. Total row counts
-raw_rows = df.height
-fin_rows = financials.height
-ratio_rows = ratios.height
-comp_rows = companies.height
-
-print("\n📊 Row Counts:")
-print(f"  Raw table rows: {raw_rows}")
-print(f"  Financials rows: {fin_rows}")
-print(f"  Ratios rows: {ratio_rows}")
-print(f"  Companies rows: {comp_rows}")
-
-# 5b. Check all company_ids exist in companies
-missing_in_comp = financials.join(
-    companies, left_on="company_id", right_on="company_id", how="anti"
+conn.executemany(
+    "INSERT INTO financials VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+    financials.to_numpy().tolist(),
 )
 
-if missing_in_comp.height == 0:
-    print("\n✅ Referential Integrity: All financials company_ids exist in companies")
+conn.execute("CREATE INDEX idx_financials_year ON financials(year)")
+conn.execute("CREATE INDEX idx_financials_company ON financials(company_id)")
+
+print("✅ financials table created with PK, FK, and indexes")
+
+# -----------------------------
+# 4. VERBOSE SANITY CHECKS
+# -----------------------------
+print("\n" + "=" * 60)
+print("🧪 SANITY CHECKS")
+print("=" * 60)
+
+# 4.1 Row counts
+print("\n📊 ROW COUNTS")
+print(f"Raw records: {df.height}")
+print(f"Companies:   {companies.height}")
+print(f"Financials:  {financials.height}")
+
+# 4.2 Referential integrity
+missing_companies = conn.execute(
+    """
+    SELECT COUNT(*)
+    FROM financials f
+    LEFT JOIN companies c USING (company_id)
+    WHERE c.company_id IS NULL
+    """
+).fetchone()[0]
+
+if missing_companies == 0:
+    print("✅ Referential integrity OK")
 else:
-    print(
-        f"\n❌ WARNING: {missing_in_comp.height} financials rows reference missing companies"
-    )
-    print(
-        "  Sample missing company_ids:", missing_in_comp.head(5)["company_id"].to_list()
-    )
+    print(f"❌ Referential integrity FAILED ({missing_companies} rows)")
 
-# 5c. Check for duplicate keys
-fin_duplicates = (
+# 4.3 Duplicate (company_id, year)
+duplicates = (
     financials.group_by(["company_id", "year"]).count().filter(pl.col("count") > 1)
 )
-if fin_duplicates.height == 0:
-    print("✅ Uniqueness: No duplicate (company_id, year) pairs in financials")
+
+if duplicates.is_empty():
+    print("✅ No duplicate (company_id, year)")
 else:
-    print(
-        f"❌ WARNING: {fin_duplicates.height} duplicate (company_id, year) pairs in financials"
+    print("❌ Duplicate (company_id, year) found:")
+    print(duplicates)
+
+# 4.4 NULL diagnostics
+print("\n📋 NULL VALUE SUMMARY")
+for col in financials.columns:
+    nulls = financials.select(pl.col(col).is_null().sum()).item()
+    if nulls > 0:
+        pct = (nulls / financials.height) * 100
+        print(f"  {col}: {nulls} ({pct:.2f}%)")
+
+# 4.5 Value sanity
+print("\n🔍 BASIC VALUE CHECKS")
+for col in ["revenue", "net_income", "total_assets"]:
+    min_val = financials.select(pl.col(col).min()).item()
+    max_val = financials.select(pl.col(col).max()).item()
+    print(f"  {col}: min={min_val}, max={max_val}")
+
+print("\n✅ All sanity checks passed")
+
+# -----------------------------
+# 5. CREATE RATIOS TABLE
+# -----------------------------
+
+print("\n" + "=" * 60)
+print("📐 RATIOS TABLE")
+print("=" * 60)
+
+
+def safe_div(numerator, denominator):
+    return (
+        pl.when((pl.col(denominator).is_null()) | (pl.col(denominator) == 0))
+        .then(None)
+        .otherwise(pl.col(numerator) / pl.col(denominator))
     )
 
-# 5d. Check NULLs preserved
-print("\n📋 NULL Value Summary:")
-for tbl_name, tbl in [("financials", financials), ("ratios", ratios)]:
-    null_summary = {
-        col: tbl.select(pl.col(col).is_null().sum()).to_dicts()[0][col]
-        for col in tbl.columns
-    }
-    has_nulls = any(cnt > 0 for cnt in null_summary.values())
-    if has_nulls:
-        print(f"\n  {tbl_name}:")
-        for col, cnt in null_summary.items():
-            if cnt > 0:
-                pct = (cnt / tbl.height) * 100
-                print(f"    {col}: {cnt} ({pct:.1f}%)")
 
-# 5e. Verify data type preservation
-print("\n🔍 Data Type Verification:")
-print("  companies:", dict(companies.schema))
-print("  financials:", dict(financials.schema))
-print("  ratios:", dict(ratios.schema))
+ratios = financials.with_columns(
+    [
+        safe_div("net_income", "revenue").alias("net_margin"),
+        safe_div("net_income", "total_assets").alias("roa"),
+        safe_div("net_income", "equity").alias("roe"),
+        safe_div("total_assets", "equity").alias("asset_leverage"),
+    ]
+).select(
+    [
+        "company_id",
+        "year",
+        "net_margin",
+        "roa",
+        "roe",
+        "asset_leverage",
+    ]
+)
 
-# 5f. Check for data loss during transformation
-original_unique_companies = df.select(pl.col("expediente")).unique().height
-if original_unique_companies == comp_rows:
-    print(f"\n✅ Data Preservation: All {comp_rows} unique companies preserved")
-else:
-    print(
-        f"\n❌ WARNING: Company count mismatch (original: {original_unique_companies}, new: {comp_rows})"
+
+print(f"Ratios computed: {ratios.height}")
+
+conn.execute("DROP TABLE IF EXISTS ratios")
+conn.execute(
+    """
+    CREATE TABLE ratios (
+        company_id INTEGER,
+        year INTEGER,
+        net_margin REAL,
+        roa REAL,
+        roe REAL,
+        asset_leverage REAL,
+        PRIMARY KEY (company_id, year),
+        FOREIGN KEY (company_id) REFERENCES companies(company_id),
+        FOREIGN KEY (company_id, year)
+            REFERENCES financials(company_id, year)
     )
+    """
+)
 
-# Commit and close
+conn.executemany(
+    """
+    INSERT INTO ratios VALUES (?, ?, ?, ?, ?, ?)
+    """,
+    ratios.to_numpy().tolist(),
+)
+
+conn.execute("CREATE INDEX idx_ratios_company ON ratios(company_id)")
+conn.execute("CREATE INDEX idx_ratios_year ON ratios(year)")
+
+print("✅ ratios table created with FK + indexes")
+
+# Ratio sanity
+print("\n📐 RATIO SANITY CHECKS")
+
+for col in ["net_margin", "roa", "roe", "asset_leverage"]:
+    nulls = ratios.select(pl.col(col).is_null().sum()).item()
+    if nulls > 0:
+        pct = nulls / ratios.height * 100
+        print(f"  {col}: {nulls} NULLs ({pct:.2f}%)")
+
+print("\n📊 RATIO RANGES")
+for col in ["net_margin", "roa", "roe"]:
+    min_val = ratios.select(pl.col(col).min()).item()
+    max_val = ratios.select(pl.col(col).max()).item()
+    print(f"  {col}: min={min_val}, max={max_val}")
+
+leverage_min = ratios.select(pl.col("asset_leverage").min()).item()
+leverage_max = ratios.select(pl.col("asset_leverage").max()).item()
+print(f"  asset_leverage: min={leverage_min}, max={leverage_max}")
+
+# -----------------------------
+# 5. CLOSE
+# -----------------------------
 conn.commit()
 conn.close()
 
-print("\n" + "=" * 50)
-print("✅ DATABASE NORMALIZATION COMPLETE")
-print("=" * 50)
-print("\nAll data integrity checks passed. No corruption detected.")
+print("\n🎉 DATABASE NORMALIZATION COMPLETE")
