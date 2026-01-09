@@ -412,3 +412,73 @@ def find_plottable_metric(
             return col
 
     raise ValidationError("No plottable numeric metrics found in the data")
+
+
+# --- Selection ---
+
+
+def select_entities(
+    df: pl.DataFrame,
+    metric: str,
+    k: int = 10,
+    year: Optional[int] = None,
+    ascending: bool = False,
+    company_col: str = "company_id",
+    year_col: str = "year",
+) -> List[int]:
+    """
+    Rank entities by a metric and return top/bottom-k entity IDs.
+
+    Semantics:
+    - If year is provided: cross-sectional ranking for that year
+    - If year is None: rank entities using their latest available value
+
+    Validates:
+    - Metric exists and is numeric
+    - Sufficient entities exist for ranking
+    """
+
+    # --- Basic validation ---
+    if company_col not in df.columns:
+        raise ValidationError(f"Company column '{company_col}' not found")
+
+    if year_col not in df.columns:
+        raise ValidationError(f"Year column '{year_col}' not found")
+
+    _validate_numeric_column(df, metric)
+
+    if k <= 0:
+        raise ValidationError(f"k must be >= 1, got {k}")
+
+    # --- Cross-section vs latest-year logic ---
+    if year is not None:
+        subset = df.filter(pl.col(year_col) == year)
+
+        if subset.is_empty():
+            raise ValidationError(f"No data available for year {year}")
+
+    else:
+        # Use latest available year per entity
+        subset = df.sort(year_col).group_by(company_col).agg(pl.all().last())
+
+    # --- Ensure comparison is meaningful ---
+    _validate_comparison(
+        subset,
+        value_col=metric,
+        group_col=company_col,
+        min_groups=2,
+    )
+
+    # --- Rank entities ---
+    ranked = (
+        subset.select([company_col, metric])
+        .drop_nulls(subset=[metric])
+        .sort(metric, descending=not ascending)
+    )
+
+    if ranked.height < k:
+        raise ValidationError(
+            f"Requested top-{k}, but only {ranked.height} entities have valid '{metric}' values"
+        )
+
+    return ranked.head(k)[company_col].to_list()

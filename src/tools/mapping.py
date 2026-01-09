@@ -21,6 +21,7 @@ from src.tools.analysis import (
     index_series,
     period_growth,
     rolling_average,
+    select_entities,
     yoy_growth,
 )
 from src.tools.visualization import (
@@ -47,6 +48,7 @@ class ToolCategory(Enum):
     VIZ_TIME = "visualization_time_series"
     VIZ_COMPARE = "visualization_comparison"
     VIZ_CORRELATION = "visualization_correlation"
+    SELECTION = "entity_selection"
 
 
 # ============================================================
@@ -203,6 +205,25 @@ TOOL_REGISTRY: Dict[str, ToolMetadata] = {
         returns="DataFrame with anomaly flag column added",
         example_usage='flag_anomalous_margin(df, "net_income", "revenue")',
         validation_requirements=["Both columns must exist and be numeric"],
+        error_type=ValidationError,
+    ),
+    # ========================================
+    # Entity Selection
+    # ========================================
+    "select_entities": ToolMetadata(
+        name="select_entities",
+        function=select_entities,
+        category=ToolCategory.SELECTION,
+        description="Rank and select top/bottom entities by a metric",
+        required_params=["df", "metric"],
+        optional_params=["k", "year", "ascending"],
+        returns="List of entity IDs",
+        example_usage='select_entities(df, "revenue", k=10, year=2023)',
+        validation_requirements=[
+            "Metric must be numeric",
+            "At least two entities must have valid data",
+            "Year must exist if provided",
+        ],
         error_type=ValidationError,
     ),
     # ========================================
@@ -369,6 +390,14 @@ def get_tools_for_intent(intent: str) -> List[str]:
         "validate": ["flag_invalid_values", "flag_anomalous_margin"],
         "smooth": ["rolling_average"],
         "average": ["rolling_average"],
+        "top": ["select_entities"],
+        "best": ["select_entities"],
+        "largest": ["select_entities"],
+        "highest": ["select_entities"],
+        "rank": ["select_entities"],
+        "ranking": ["select_entities"],
+        "bottom": ["select_entities"],
+        "worst": ["select_entities"],
     }
 
     intent_lower = intent.lower()
