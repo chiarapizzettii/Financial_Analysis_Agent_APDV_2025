@@ -181,6 +181,49 @@ ANALYSIS ACTIONS
    Use when: User wants data quality checks
 
 ═══════════════════════════════════════════════════════════
+SUMMARY STATISTICS
+═══════════════════════════════════════════════════════════
+
+9. compute_summary_stats
+   Description: Compute summary statistics (mean, median, std, var, min, max)
+   Required: metric (string)
+   Optional: stats (list of strings, e.g., ["mean", "median", "std"])
+   Example: {"action": "compute_summary_stats", "metric": "revenue", "stats": ["mean", "median", "std"]}
+   Use when: User asks for averages, medians, standard deviations, or general statistics
+
+10. group_summary_stats
+   Description: Compute summary statistics grouped by a category
+   Required: metric (string), group_col (string)
+   Optional: stats (list of strings)
+   Example: {"action": "group_summary_stats", "metric": "revenue", "group_col": "company_size", "stats": ["mean", "count"]}
+   Use when: User wants statistics broken down by groups/categories
+
+═══════════════════════════════════════════════════════════
+SELECTION & FILTERING
+═══════════════════════════════════════════════════════════
+
+11. select_top_k
+    Description: Select top-k or bottom-k companies based on a metric
+    Required: metric (string)
+    Optional: k (integer, default 10), ascending (boolean, default false)
+    Example: {"action": "select_top_k", "metric": "revenue", "k": 10, "ascending": false}
+    Use when: User asks for "top 10", "highest", "best", "lowest", "worst"
+
+12. filter_by_condition
+    Description: Filter data by a condition
+    Required: column (string), operator (string), value (any)
+    Operators: ">", "<", ">=", "<=", "==", "!="
+    Example: {"action": "filter_by_condition", "column": "is_public", "operator": "==", "value": true}
+    Use when: User wants to filter data (e.g., "only public companies", "revenue greater than X")
+
+13. aggregate_by_group
+    Description: Aggregate a metric by group
+    Required: group_col (string), agg_col (string)
+    Optional: agg_func (string: "sum", "mean", "count", "min", "max")
+    Example: {"action": "aggregate_by_group", "group_col": "industry_code_level1", "agg_col": "revenue", "agg_func": "sum"}
+    Use when: User wants totals or aggregations by category
+
+═══════════════════════════════════════════════════════════
 AVAILABLE METRICS
 ═══════════════════════════════════════════════════════════
 
@@ -214,10 +257,15 @@ RULES
 2. For comparison questions → use "compare_companies"
 3. For relationship questions → use "correlation"
 4. For growth/change questions → use "yoy_growth" then "plot_trend"
-5. Use exact metric names from the list above
-6. Year values should be integers (e.g., 2023, not "2023")
-7. Company IDs should be lists of integers (e.g., [1, 2, 3])
-8. Output ONLY valid JSON, no markdown, no explanations
+5. For "top X" or "bottom X" questions → use "select_top_k"
+6. For filtering questions ("only public", "revenue > X") → use "filter_by_condition"
+7. For statistics questions (mean, median, average) → use "compute_summary_stats"
+8. For grouped statistics → use "group_summary_stats"
+9. For aggregations by category → use "aggregate_by_group"
+10. Use exact metric names from the list above
+11. Year values should be integers (e.g., 2023, not "2023")
+12. For boolean values use lowercase: true, false (not True, False)
+13. Output ONLY valid JSON, no markdown, no explanations
 
 ═══════════════════════════════════════════════════════════
 OUTPUT FORMAT
@@ -317,6 +365,11 @@ def _validate_plan(plan: Dict[str, Any]) -> None:
         "compute_margin": ["numerator", "denominator", "output_col"],
         "compute_share": ["value_col", "total_col", "output_col"],
         "flag_invalid_values": ["cols"],
+        "compute_summary_stats": ["metric"],
+        "group_summary_stats": ["metric", "group_col"],
+        "select_top_k": ["metric"],
+        "filter_by_condition": ["column", "operator", "value"],
+        "aggregate_by_group": ["group_col", "agg_col"],
     }
 
     if action not in required_params:

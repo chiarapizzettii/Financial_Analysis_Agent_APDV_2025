@@ -10,7 +10,7 @@ Design principles:
 - Return actionable feedback to agents
 """
 
-from typing import List, Optional
+from typing import Any, List, Optional
 
 import polars as pl
 
@@ -167,6 +167,229 @@ def _validate_ratio_computation(
         print(
             f"Warning: {zero_count} zero values in denominator '{denominator_col}' will produce null ratios"
         )
+
+
+# ---------- Summary Statistics ----------
+
+
+def compute_summary_stats(
+    df: pl.DataFrame,
+    value_col: str,
+    stats: List[str] = ["mean", "median", "std", "var", "min", "max"],
+) -> pl.DataFrame:
+    """
+    Compute summary statistics for a column.
+
+    Args:
+        df: DataFrame
+        value_col: Column to analyze
+        stats: List of statistics to compute
+            Options: 'mean', 'median', 'std', 'var', 'min', 'max', 'count'
+
+    Returns:
+        DataFrame with one row containing the statistics
+
+    Validates:
+        - Column exists and is numeric
+        - Sufficient non-null values
+    """
+    _validate_sufficient_data(
+        df, value_col, min_rows=1, min_non_null=1, operation="summary statistics"
+    )
+
+    expressions = []
+
+    stat_mapping = {
+        "mean": pl.col(value_col).mean().alias(f"{value_col}_mean"),
+        "median": pl.col(value_col).median().alias(f"{value_col}_median"),
+        "std": pl.col(value_col).std().alias(f"{value_col}_std"),
+        "var": pl.col(value_col).var().alias(f"{value_col}_var"),
+        "min": pl.col(value_col).min().alias(f"{value_col}_min"),
+        "max": pl.col(value_col).max().alias(f"{value_col}_max"),
+        "count": pl.col(value_col).count().alias(f"{value_col}_count"),
+    }
+
+    for stat in stats:
+        if stat not in stat_mapping:
+            raise ValueError(
+                f"Unknown statistic '{stat}'. Available: {list(stat_mapping.keys())}"
+            )
+        expressions.append(stat_mapping[stat])
+
+    return df.select(expressions)
+
+
+def group_summary_stats(
+    df: pl.DataFrame,
+    value_col: str,
+    group_col: str,
+    stats: List[str] = ["mean", "median", "count"],
+) -> pl.DataFrame:
+    """
+    Compute summary statistics grouped by a category.
+
+    Args:
+        df: DataFrame
+        value_col: Column to analyze
+        group_col: Column to group by
+        stats: List of statistics to compute
+
+    Returns:
+        DataFrame with statistics per group
+
+    Validates:
+        - Both columns exist
+        - Value column is numeric
+        - At least 2 groups exist
+    """
+    if group_col not in df.columns:
+        raise ValidationError(f"Group column '{group_col}' not found")
+
+    _validate_comparison(df, value_col, group_col, min_groups=1)
+
+    expressions = []
+
+    stat_mapping = {
+        "mean": pl.col(value_col).mean().alias(f"{value_col}_mean"),
+        "median": pl.col(value_col).median().alias(f"{value_col}_median"),
+        "std": pl.col(value_col).std().alias(f"{value_col}_std"),
+        "sum": pl.col(value_col).sum().alias(f"{value_col}_sum"),
+        "min": pl.col(value_col).min().alias(f"{value_col}_min"),
+        "max": pl.col(value_col).max().alias(f"{value_col}_max"),
+        "count": pl.col(value_col).count().alias(f"{value_col}_count"),
+    }
+
+    for stat in stats:
+        if stat not in stat_mapping:
+            raise ValueError(
+                f"Unknown statistic '{stat}'. Available: {list(stat_mapping.keys())}"
+            )
+        expressions.append(stat_mapping[stat])
+
+    return df.group_by(group_col).agg(expressions)
+
+
+# ---------- Selection & Filtering ----------
+
+
+def filter_by_condition(
+    df: pl.DataFrame,
+    column: str,
+    operator: str,
+    value: Any,
+) -> pl.DataFrame:
+    """
+    Filter DataFrame by a condition.
+
+    Args:
+        df: DataFrame
+        column: Column to filter on
+        operator: One of: '>', '<', '>=', '<=', '==', '!='
+        value: Value to compare against
+
+    Returns:
+        Filtered DataFrame
+
+    Example:
+        filter_by_condition(df, 'revenue', '>', 1000000)
+        filter_by_condition(df, 'is_public', '==', True)
+    """
+    if column not in df.columns:
+        raise ValidationError(f"Column '{column}' not found")
+
+    operators = {
+        ">": lambda col, val: pl.col(col) > val,
+        "<": lambda col, val: pl.col(col) < val,
+        ">=": lambda col, val: pl.col(col) >= val,
+        "<=": lambda col, val: pl.col(col) <= val,
+        "==": lambda col, val: pl.col(col) == val,
+        "!=": lambda col, val: pl.col(col) != val,
+    }
+
+    if operator not in operators:
+        raise ValueError(
+            f"Invalid operator '{operator}'. Use one of: {list(operators.keys())}"
+        )
+
+    condition = operators[operator](column, value)
+    result = df.filter(condition)
+
+    if result.is_empty():
+        raise ValidationError(f"No rows match condition: {column} {operator} {value}")
+
+    return result
+
+
+def select_top_k(
+    df: pl.DataFrame,
+    metric: str,
+    k: int = 10,
+    ascending: bool = False,
+) -> pl.DataFrame:
+    """
+    Select top-k rows based on a metric.
+
+    Args:
+        df: DataFrame
+        metric: Column to rank by
+        k: Number of rows to return
+        ascending: If True, return bottom-k instead of top-k
+
+    Returns:
+        DataFrame with top-k rows
+
+    Validates:
+        - Metric column exists and is numeric
+        - At least k rows available
+    """
+    _validate_numeric_column(df, metric)
+
+    if k <= 0:
+        raise ValueError(f"k must be positive, got {k}")
+
+    if k > len(df):
+        raise ValidationError(f"Requested top-{k}, but only {len(df)} rows available")
+
+    return df.sort(metric, descending=not ascending).head(k)
+
+
+def aggregate_by_group(
+    df: pl.DataFrame,
+    group_col: str,
+    agg_col: str,
+    agg_func: str = "sum",
+) -> pl.DataFrame:
+    """
+    Aggregate a column by group.
+
+    Args:
+        df: DataFrame
+        group_col: Column to group by
+        agg_col: Column to aggregate
+        agg_func: Aggregation function ('sum', 'mean', 'count', 'min', 'max')
+
+    Returns:
+        DataFrame with aggregated results
+    """
+    if group_col not in df.columns:
+        raise ValidationError(f"Group column '{group_col}' not found")
+
+    _validate_numeric_column(df, agg_col)
+
+    agg_functions = {
+        "sum": pl.col(agg_col).sum().alias(f"{agg_col}_sum"),
+        "mean": pl.col(agg_col).mean().alias(f"{agg_col}_mean"),
+        "count": pl.col(agg_col).count().alias(f"{agg_col}_count"),
+        "min": pl.col(agg_col).min().alias(f"{agg_col}_min"),
+        "max": pl.col(agg_col).max().alias(f"{agg_col}_max"),
+    }
+
+    if agg_func not in agg_functions:
+        raise ValueError(
+            f"Invalid aggregation '{agg_func}'. Use: {list(agg_functions.keys())}"
+        )
+
+    return df.group_by(group_col).agg(agg_functions[agg_func])
 
 
 # ---------- Growth & Trends ----------
@@ -412,73 +635,3 @@ def find_plottable_metric(
             return col
 
     raise ValidationError("No plottable numeric metrics found in the data")
-
-
-# --- Selection ---
-
-
-def select_entities(
-    df: pl.DataFrame,
-    metric: str,
-    k: int = 10,
-    year: Optional[int] = None,
-    ascending: bool = False,
-    company_col: str = "company_id",
-    year_col: str = "year",
-) -> List[int]:
-    """
-    Rank entities by a metric and return top/bottom-k entity IDs.
-
-    Semantics:
-    - If year is provided: cross-sectional ranking for that year
-    - If year is None: rank entities using their latest available value
-
-    Validates:
-    - Metric exists and is numeric
-    - Sufficient entities exist for ranking
-    """
-
-    # --- Basic validation ---
-    if company_col not in df.columns:
-        raise ValidationError(f"Company column '{company_col}' not found")
-
-    if year_col not in df.columns:
-        raise ValidationError(f"Year column '{year_col}' not found")
-
-    _validate_numeric_column(df, metric)
-
-    if k <= 0:
-        raise ValidationError(f"k must be >= 1, got {k}")
-
-    # --- Cross-section vs latest-year logic ---
-    if year is not None:
-        subset = df.filter(pl.col(year_col) == year)
-
-        if subset.is_empty():
-            raise ValidationError(f"No data available for year {year}")
-
-    else:
-        # Use latest available year per entity
-        subset = df.sort(year_col).group_by(company_col).agg(pl.all().last())
-
-    # --- Ensure comparison is meaningful ---
-    _validate_comparison(
-        subset,
-        value_col=metric,
-        group_col=company_col,
-        min_groups=2,
-    )
-
-    # --- Rank entities ---
-    ranked = (
-        subset.select([company_col, metric])
-        .drop_nulls(subset=[metric])
-        .sort(metric, descending=not ascending)
-    )
-
-    if ranked.height < k:
-        raise ValidationError(
-            f"Requested top-{k}, but only {ranked.height} entities have valid '{metric}' values"
-        )
-
-    return ranked.head(k)[company_col].to_list()

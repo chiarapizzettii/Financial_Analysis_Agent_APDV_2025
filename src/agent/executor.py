@@ -14,13 +14,18 @@ import polars as pl
 
 from src.tools.analysis import (
     ValidationError,
+    aggregate_by_group,
     compute_margin,
     compute_share,
+    compute_summary_stats,
+    filter_by_condition,
     find_plottable_metric,
     flag_invalid_values,
+    group_summary_stats,
     is_plottable,
     load_processed_data,
     rolling_average,
+    select_top_k,
     yoy_growth,
 )
 from src.tools.mapping import (
@@ -457,6 +462,140 @@ def _execute_flag_invalid_values(
         )
 
 
+def _execute_compute_summary_stats(
+    df: pl.DataFrame, plan: Dict[str, Any]
+) -> Union[pl.DataFrame, ExecutionResult]:
+    """Execute compute_summary_stats action."""
+    try:
+        result_df = compute_summary_stats(
+            df=df,
+            value_col=plan["metric"],
+            stats=plan.get("stats", ["mean", "median", "std", "min", "max"]),
+        )
+
+        return ExecutionResult(
+            success=True,
+            result=result_df,
+            action="compute_summary_stats",
+        )
+
+    except ValidationError as e:
+        return ExecutionResult(
+            success=False,
+            error=str(e),
+            error_type="ValidationError",
+            action="compute_summary_stats",
+        )
+
+
+def _execute_group_summary_stats(
+    df: pl.DataFrame, plan: Dict[str, Any]
+) -> Union[pl.DataFrame, ExecutionResult]:
+    """Execute group_summary_stats action."""
+    try:
+        result_df = group_summary_stats(
+            df=df,
+            value_col=plan["metric"],
+            group_col=plan["group_col"],
+            stats=plan.get("stats", ["mean", "median", "count"]),
+        )
+
+        return ExecutionResult(
+            success=True,
+            result=result_df,
+            action="group_summary_stats",
+        )
+
+    except ValidationError as e:
+        return ExecutionResult(
+            success=False,
+            error=str(e),
+            error_type="ValidationError",
+            action="group_summary_stats",
+        )
+
+
+def _execute_select_top_k(
+    df: pl.DataFrame, plan: Dict[str, Any]
+) -> Union[pl.DataFrame, ExecutionResult]:
+    """Execute select_top_k action."""
+    try:
+        result_df = select_top_k(
+            df=df,
+            metric=plan["metric"],
+            k=plan.get("k", 10),
+            ascending=plan.get("ascending", False),
+        )
+
+        return ExecutionResult(
+            success=True,
+            result=result_df,
+            action="select_top_k",
+        )
+
+    except ValidationError as e:
+        return ExecutionResult(
+            success=False,
+            error=str(e),
+            error_type="ValidationError",
+            action="select_top_k",
+        )
+
+
+def _execute_filter_by_condition(
+    df: pl.DataFrame, plan: Dict[str, Any]
+) -> Union[pl.DataFrame, ExecutionResult]:
+    """Execute filter_by_condition action."""
+    try:
+        result_df = filter_by_condition(
+            df=df,
+            column=plan["column"],
+            operator=plan["operator"],
+            value=plan["value"],
+        )
+
+        return ExecutionResult(
+            success=True,
+            result=result_df,
+            action="filter_by_condition",
+        )
+
+    except ValidationError as e:
+        return ExecutionResult(
+            success=False,
+            error=str(e),
+            error_type="ValidationError",
+            action="filter_by_condition",
+        )
+
+
+def _execute_aggregate_by_group(
+    df: pl.DataFrame, plan: Dict[str, Any]
+) -> Union[pl.DataFrame, ExecutionResult]:
+    """Execute aggregate_by_group action."""
+    try:
+        result_df = aggregate_by_group(
+            df=df,
+            group_col=plan["group_col"],
+            agg_col=plan["agg_col"],
+            agg_func=plan.get("agg_func", "sum"),
+        )
+
+        return ExecutionResult(
+            success=True,
+            result=result_df,
+            action="aggregate_by_group",
+        )
+
+    except ValidationError as e:
+        return ExecutionResult(
+            success=False,
+            error=str(e),
+            error_type="ValidationError",
+            action="aggregate_by_group",
+        )
+
+
 # ============================================================
 # Main Executor
 # ============================================================
@@ -498,6 +637,11 @@ def execute_plan(
         "compute_margin": _execute_compute_margin,
         "compute_share": _execute_compute_share,
         "flag_invalid_values": _execute_flag_invalid_values,
+        "compute_summary_stats": _execute_compute_summary_stats,
+        "group_summary_stats": _execute_group_summary_stats,
+        "select_top_k": _execute_select_top_k,
+        "filter_by_condition": _execute_filter_by_condition,
+        "aggregate_by_group": _execute_aggregate_by_group,
     }
 
     if action not in executors:

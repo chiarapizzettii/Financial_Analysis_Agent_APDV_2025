@@ -14,14 +14,21 @@ from typing import Any, Callable, Dict, List
 
 from src.tools.analysis import (
     ValidationError,
+    aggregate_by_group,
     compute_margin,
     compute_share,
+    compute_summary_stats,
+    filter_by_condition,
+    find_plottable_metric,
     flag_anomalous_margin,
     flag_invalid_values,
+    group_summary_stats,
     index_series,
+    is_plottable,
+    load_processed_data,
     period_growth,
     rolling_average,
-    select_entities,
+    select_top_k,
     yoy_growth,
 )
 from src.tools.visualization import (
@@ -45,6 +52,8 @@ class ToolCategory(Enum):
     GROWTH = "growth_and_trends"
     RATIO = "ratios_and_shares"
     QUALITY = "data_quality"
+    STATISTICS = "summary_statistics"
+    SELECTION = "selection_and_filtering"
     VIZ_TIME = "visualization_time_series"
     VIZ_COMPARE = "visualization_comparison"
     VIZ_CORRELATION = "visualization_correlation"
@@ -77,6 +86,89 @@ class ToolMetadata:
 
 
 TOOL_REGISTRY: Dict[str, ToolMetadata] = {
+    # ========================================
+    # Summary Statistics
+    # ========================================
+    "compute_summary_stats": ToolMetadata(
+        name="compute_summary_stats",
+        function=compute_summary_stats,
+        category=ToolCategory.STATISTICS,
+        description="Compute summary statistics (mean, median, std, etc.) for a metric",
+        required_params=["df", "value_col"],
+        optional_params=["stats"],
+        returns="DataFrame with statistics",
+        example_usage='compute_summary_stats(df, "revenue", stats=["mean", "median", "std"])',
+        validation_requirements=[
+            "Column must be numeric",
+            "At least one non-null value required",
+        ],
+        error_type=ValidationError,
+    ),
+    "group_summary_stats": ToolMetadata(
+        name="group_summary_stats",
+        function=group_summary_stats,
+        category=ToolCategory.STATISTICS,
+        description="Compute summary statistics grouped by a category",
+        required_params=["df", "value_col", "group_col"],
+        optional_params=["stats"],
+        returns="DataFrame with statistics per group",
+        example_usage='group_summary_stats(df, "revenue", "company_size", stats=["mean", "count"])',
+        validation_requirements=[
+            "Value column must be numeric",
+            "Group column must exist",
+            "At least one group required",
+        ],
+        error_type=ValidationError,
+    ),
+    # ========================================
+    # Selection & Filtering
+    # ========================================
+    "select_top_k": ToolMetadata(
+        name="select_top_k",
+        function=select_top_k,
+        category=ToolCategory.SELECTION,
+        description="Select top-k rows based on a metric ranking",
+        required_params=["df", "metric"],
+        optional_params=["k", "ascending"],
+        returns="DataFrame with top-k rows",
+        example_usage='select_top_k(df, "revenue", k=10, ascending=False)',
+        validation_requirements=[
+            "Metric must be numeric",
+            "At least k rows must be available",
+        ],
+        error_type=ValidationError,
+    ),
+    "filter_by_condition": ToolMetadata(
+        name="filter_by_condition",
+        function=filter_by_condition,
+        category=ToolCategory.SELECTION,
+        description="Filter DataFrame by a condition (>, <, ==, etc.)",
+        required_params=["df", "column", "operator", "value"],
+        optional_params=[],
+        returns="Filtered DataFrame",
+        example_usage='filter_by_condition(df, "is_public", "==", True)',
+        validation_requirements=[
+            "Column must exist",
+            "Operator must be valid",
+            "At least one row must match condition",
+        ],
+        error_type=ValidationError,
+    ),
+    "aggregate_by_group": ToolMetadata(
+        name="aggregate_by_group",
+        function=aggregate_by_group,
+        category=ToolCategory.SELECTION,
+        description="Aggregate a metric by group (sum, mean, count, etc.)",
+        required_params=["df", "group_col", "agg_col"],
+        optional_params=["agg_func"],
+        returns="DataFrame with aggregated results",
+        example_usage='aggregate_by_group(df, "industry_code_level1", "revenue", "sum")',
+        validation_requirements=[
+            "Both columns must exist",
+            "Aggregation column must be numeric",
+        ],
+        error_type=ValidationError,
+    ),
     # ========================================
     # Growth & Trends
     # ========================================
@@ -369,7 +461,19 @@ def get_tools_for_intent(intent: str) -> List[str]:
         "quality": ["flag_invalid_values", "flag_anomalous_margin"],
         "validate": ["flag_invalid_values", "flag_anomalous_margin"],
         "smooth": ["rolling_average"],
-        "average": ["rolling_average"],
+        "statistics": ["compute_summary_stats", "group_summary_stats"],
+        "summary": ["compute_summary_stats", "group_summary_stats"],
+        "mean": ["compute_summary_stats", "group_summary_stats"],
+        "median": ["compute_summary_stats"],
+        "average": ["compute_summary_stats", "rolling_average"],
+        "top": ["select_top_k"],
+        "bottom": ["select_top_k"],
+        "ranking": ["select_top_k"],
+        "filter": ["filter_by_condition"],
+        "select": ["filter_by_condition", "select_top_k"],
+        "public": ["filter_by_condition"],
+        "aggregate": ["aggregate_by_group", "group_summary_stats"],
+        "group": ["aggregate_by_group", "group_summary_stats"],
     }
 
     intent_lower = intent.lower()
