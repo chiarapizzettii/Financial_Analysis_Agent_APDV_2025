@@ -538,6 +538,23 @@ def _validate_plan(plan: Dict[str, Any]) -> None:
 
         _validate_step(step, step_num=i)
 
+    # Check for invalid combination: compare_companies followed by plot_trend for same metric
+    for i in range(len(plan["steps"]) - 1):
+        current_step = plan["steps"][i]
+        next_step = plan["steps"][i + 1]
+
+        if (
+            current_step.get("action") == "compare_companies"
+            and next_step.get("action") == "plot_trend"
+            and current_step.get("metric") == next_step.get("metric")
+        ):
+            # This is likely a mistake - remove the plot_trend step
+            print(
+                f"⚠️  Auto-removing redundant plot_trend after compare_companies for same metric"
+            )
+            plan["steps"].pop(i + 1)
+            break
+
 
 def _validate_step(step: Dict[str, Any], step_num: int) -> None:
     """Validate a single step in the plan."""
