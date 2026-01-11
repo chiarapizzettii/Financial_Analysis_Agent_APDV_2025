@@ -30,6 +30,35 @@ class CompanyReport(FPDF):
         self.company_name = company_name
         self.set_auto_page_break(auto=True, margin=15)
 
+    def safe_text(self, text: str) -> str:
+        """Convert text to latin-1 safe format."""
+        # Replace common problematic characters
+        replacements = {
+            "€": "EUR",
+            "£": "GBP",
+            "¥": "JPY",
+            "©": "(c)",
+            "®": "(R)",
+            "™": "(TM)",
+            '"': '"',
+            '"': '"',
+            """: "'",
+            """: "'",
+            "–": "-",
+            "—": "-",
+        }
+
+        for old, new in replacements.items():
+            text = text.replace(old, new)
+
+        # Remove any remaining non-latin-1 characters
+        try:
+            text.encode("latin-1")
+        except UnicodeEncodeError:
+            text = text.encode("latin-1", errors="replace").decode("latin-1")
+
+        return text
+
     def header(self):
         """Custom header with styling."""
         # Colored header bar
@@ -44,7 +73,7 @@ class CompanyReport(FPDF):
 
         if self.company_name:
             self.set_font("Arial", "I", 10)
-            self.cell(0, 5, self.company_name, 0, 1, "C")
+            self.cell(0, 5, self.safe_text(self.company_name), 0, 1, "C")
 
         self.set_text_color(0, 0, 0)
         self.ln(5)
@@ -62,7 +91,7 @@ class CompanyReport(FPDF):
         self.ln(5)
         self.set_font("Arial", "B", 14)
         self.set_fill_color(230, 240, 250)
-        self.cell(0, 10, title, 0, 1, "L", True)
+        self.cell(0, 10, self.safe_text(title), 0, 1, "L", True)
         self.ln(3)
 
     def add_table(
@@ -82,7 +111,9 @@ class CompanyReport(FPDF):
         self.set_text_color(255, 255, 255)
 
         for i, header in enumerate(headers):
-            self.cell(col_widths[i], 10, str(header)[:20], 1, 0, "C", True)
+            self.cell(
+                col_widths[i], 10, self.safe_text(str(header)[:20]), 1, 0, "C", True
+            )
         self.ln()
 
         # Table rows
@@ -96,7 +127,9 @@ class CompanyReport(FPDF):
                     self.set_fill_color(240, 248, 255)
                 else:
                     self.set_fill_color(255, 255, 255)
-                self.cell(col_widths[i], 8, str(cell)[:20], 1, 0, "C", True)
+                self.cell(
+                    col_widths[i], 8, self.safe_text(str(cell)[:20]), 1, 0, "C", True
+                )
             self.ln()
             fill = not fill
 
@@ -132,12 +165,12 @@ class CompanyReport(FPDF):
             self.set_xy(x + 5, y + 5)
             self.set_font("Arial", "B", 10)
             self.set_text_color(255, 255, 255)
-            self.cell(card_width - 10, 8, metric[:30], 0, 1)
+            self.cell(card_width - 10, 8, self.safe_text(metric[:30]), 0, 1)
 
             # Metric value
             self.set_xy(x + 5, y + 13)
             self.set_font("Arial", "B", 14)
-            self.cell(card_width - 10, 8, str(value)[:20], 0, 1)
+            self.cell(card_width - 10, 8, self.safe_text(str(value)[:20]), 0, 1)
 
         self.set_text_color(0, 0, 0)
         self.set_y(y_start + ((len(metrics) + 1) // 2) * (card_height + 5) + 10)
@@ -200,7 +233,7 @@ def generate_report_from_state(
         pdf.set_font("Arial", "B", 11)
         pdf.cell(0, 8, "Query:", 0, 1)
         pdf.set_font("Arial", "I", 10)
-        pdf.multi_cell(0, 6, user_query)
+        pdf.multi_cell(0, 6, pdf.safe_text(user_query))
 
     pdf.ln(5)
 
@@ -368,7 +401,7 @@ def generate_pdf_report(
     # Main analysis
     pdf.add_section_title("Analysis and Comments")
     pdf.set_font("Arial", "", 11)
-    pdf.multi_cell(0, 7, analysis_text)
+    pdf.multi_cell(0, 7, pdf.safe_text(analysis_text))
     pdf.ln(5)
 
     # Tables (if provided)
@@ -426,7 +459,7 @@ Recommendations:
     """
 
     key_metrics = {
-        "Revenue": "€2.5M",
+        "Revenue": "$2.5M",
         "Growth": "+15%",
         "Margin": "18.5%",
         "Customers": "245",
@@ -435,7 +468,7 @@ Recommendations:
     tables = [
         {
             "title": "Quarterly Performance",
-            "headers": ["Quarter", "Revenue (€M)", "Margin (%)", "Customers"],
+            "headers": ["Quarter", "Revenue ($M)", "Margin (%)", "Customers"],
             "data": [
                 ["Q1 2024", "1.8", "14.2", "1,250"],
                 ["Q2 2024", "2.0", "15.1", "1,420"],

@@ -8,7 +8,7 @@ Creates multi-step plans where each step can use outputs from previous steps.
 """
 
 import json
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Set
 
 import ollama
 
@@ -154,11 +154,13 @@ ANALYSIS OPERATIONS:
    Description: Calculate margin/ratio between two metrics
    Required: numerator (string), denominator (string), output_col (string)
    Example: {"action": "compute_margin", "numerator": "net_income", "denominator": "revenue", "output_col": "profit_margin"}
+   Note: output_col is the NEW column being created - it doesn't need to exist yet
 
 7. compute_share
    Description: Calculate value as percentage of total
    Required: value_col (string), total_col (string), output_col (string)
    Example: {"action": "compute_share", "value_col": "segment_revenue", "total_col": "total_revenue", "output_col": "market_share"}
+   Note: output_col is the NEW column being created - it doesn't need to exist yet
 
 VISUALIZATION OPERATIONS:
 ------------------------
@@ -168,6 +170,7 @@ VISUALIZATION OPERATIONS:
    Required: metric (string)
    Optional: company_ids (list of integers)
    Example: {"action": "plot_trend", "metric": "revenue", "company_ids": [1, 2, 3]}
+   Note: Can plot metrics created in previous steps (like profit_margin)
 
 9. compare_companies
    Description: Compare companies on a metric for a single year (bar chart)
@@ -200,6 +203,7 @@ SEQUENTIAL PLANNING RULES
 4. You can reference previous steps' outputs implicitly
 5. Keep plans focused - typically 2-5 steps for most queries
 6. Always end with either a visualization or export for user-facing queries
+7. NEW COLUMNS created by compute_margin, compute_share, yoy_growth, rolling_average can be used in later steps
 
 CRITICAL JSON FORMATTING RULES:
 - ALL values must be valid JSON (numbers, strings, arrays, objects, booleans, null)
@@ -295,8 +299,8 @@ Plan:
       "metric": "roe_calculated"
     },
     {
-      "action": "create_report",
-      "title": "ROE Analysis 2020-2023"
+      "action": "generate_report",
+      "custom_filename": "ROE_Analysis_2020_2023"
     }
   ]
 }
@@ -508,6 +512,9 @@ def _validate_plan(plan: Dict[str, Any]) -> None:
     if len(plan["steps"]) == 0:
         raise ValueError("Plan must have at least one step")
 
+    # Track columns created by previous steps
+    created_columns: Set[str] = set()
+
     # Extract year from filter steps if present (for auto-fixing compare_companies)
     extracted_year = None
     for step in plan["steps"]:
@@ -536,7 +543,24 @@ def _validate_plan(plan: Dict[str, Any]) -> None:
         ):
             step["year"] = extracted_year
 
-        _validate_step(step, step_num=i)
+        _validate_step(step, step_num=i, created_columns=created_columns)
+
+        # Track new columns created by this step
+        if step["action"] in ["compute_margin", "compute_share"]:
+            if "output_col" in step:
+                created_columns.add(step["output_col"])
+        elif step["action"] == "yoy_growth":
+            if "output_col" in step:
+                created_columns.add(step["output_col"])
+            else:
+                # Default output column name
+                created_columns.add(f"{step['metric']}_yoy")
+        elif step["action"] == "rolling_average":
+            if "output_col" in step:
+                created_columns.add(step["output_col"])
+            else:
+                # Default output column name
+                created_columns.add(f"{step['metric']}_ma{step['window']}")
 
     # Check for invalid combination: compare_companies followed by plot_trend for same metric
     for i in range(len(plan["steps"]) - 1):
@@ -556,7 +580,9 @@ def _validate_plan(plan: Dict[str, Any]) -> None:
             break
 
 
-def _validate_step(step: Dict[str, Any], step_num: int) -> None:
+def _validate_step(
+    step: Dict[str, Any], step_num: int, created_columns: Set[str]
+) -> None:
     """Validate a single step in the plan."""
 
     action = step["action"]
@@ -621,15 +647,16 @@ def _validate_step(step: Dict[str, Any], step_num: int) -> None:
                     )
 
     # Validate metric names
-    _validate_metrics_in_step(step)
+    _validate_metrics_in_step(step, created_columns)
 
 
-def _validate_metrics_in_step(step: Dict[str, Any]) -> None:
+def _validate_metrics_in_step(step: Dict[str, Any], created_columns: Set[str]) -> None:
     """Validate all metric references in a step."""
 
     metrics_to_check = []
+    output_columns = []  # Columns being created, not consumed
 
-    # Collect all metric references
+    # Collect all metric references (inputs)
     if "metric" in step:
         metrics_to_check.append(step["metric"])
 
@@ -654,40 +681,52 @@ def _validate_metrics_in_step(step: Dict[str, Any]) -> None:
     if "group_by" in step:
         metrics_to_check.append(step["group_by"])
 
+    # Collect output columns (being created, not validated)
+    if "output_col" in step:
+        output_columns.append(step["output_col"])
+
     # Also check filter conditions
     if "conditions" in step:
         for condition in step["conditions"]:
             if "column" in condition:
                 metrics_to_check.append(condition["column"])
 
-    # Validate each metric
+    # Validate each INPUT metric (not output columns)
     for metric in metrics_to_check:
-        _validate_metric(metric)
+        if metric not in output_columns:  # Don't validate output columns
+            _validate_metric(metric, created_columns)
 
 
-def _validate_metric(metric: str) -> None:
+def _validate_metric(metric: str, created_columns: Set[str]) -> None:
     """
-    Validate that metric exists in available metrics.
+    Validate that metric exists in available metrics or was created in a previous step.
 
     Args:
         metric: Metric name to validate
+        created_columns: Set of columns created by previous steps
 
     Raises:
-        ValueError: If metric not in available metrics
+        ValueError: If metric not in available metrics and not created
     """
-    if metric not in AVAILABLE_METRICS:
-        # Find similar metrics for helpful error message
-        similar = [
-            m
-            for m in AVAILABLE_METRICS
-            if metric.lower() in m.lower() or m.lower() in metric.lower()
-        ]
+    # Check if metric exists in base metrics or was created
+    if metric in AVAILABLE_METRICS or metric in created_columns:
+        return
 
-        error_msg = f"Unknown metric '{metric}'."
-        if similar:
-            error_msg += f" Did you mean one of: {similar[:5]}?"
+    # Find similar metrics for helpful error message
+    similar = [
+        m
+        for m in AVAILABLE_METRICS
+        if metric.lower() in m.lower() or m.lower() in metric.lower()
+    ]
 
-        raise ValueError(error_msg)
+    error_msg = f"Unknown metric '{metric}'."
+    if similar:
+        error_msg += f" Did you mean one of: {similar[:5]}?"
+
+    if created_columns:
+        error_msg += f" (Note: columns created so far: {sorted(created_columns)})"
+
+    raise ValueError(error_msg)
 
 
 # ============================================================

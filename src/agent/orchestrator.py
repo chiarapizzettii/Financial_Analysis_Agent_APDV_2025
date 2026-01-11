@@ -439,38 +439,38 @@ def interactive_mode(
 
 
 if __name__ == "__main__":
-    # Example 1: Simple sequential workflow
-    print("Example 1: Sequential workflow")
-    print("-" * 70)
+    # # Example 1: Simple sequential workflow
+    # print("Example 1: Sequential workflow")
+    # print("-" * 70)
 
-    state = quick_query(
-        "Filter to companies 1-5, calculate profit margins, and plot the trend"
-    )
+    # state = quick_query(
+    #     "Filter to companies 1-5, calculate profit margins, and plot the trend"
+    # )
 
-    # Example 2: Complex multi-step analysis
-    print("\n\nExample 2: Complex analysis")
-    print("-" * 70)
+    # # Example 2: Complex multi-step analysis
+    # print("\n\nExample 2: Complex analysis")
+    # print("-" * 70)
 
-    state = quick_query(
-        "Filter to year 2023, compute summary stats for revenue and assets, "
-        "then compare net income across companies and export to CSV"
-    )
+    # state = quick_query(
+    #     "Filter to year 2023, compute summary stats for revenue and assets, "
+    #     "then compare net income across companies and export to CSV"
+    # )
 
-    # Example 3: Agent with multiple queries
-    print("\n\nExample 3: Batch processing")
-    print("-" * 70)
+    # # Example 3: Agent with multiple queries
+    # print("\n\nExample 3: Batch processing")
+    # print("-" * 70)
 
-    agent = FinancialAnalysisAgent(verbose=True)
+    # agent = FinancialAnalysisAgent(verbose=True)
 
-    queries = [
-        "Show revenue trends for top 3 companies",
-        "Calculate ROE for all companies and show correlation with revenue",
-        "Filter to 2020-2023, compute 3-year rolling averages, and create a report",
-    ]
+    # queries = [
+    #     "Show revenue trends for top 3 companies",
+    #     "Calculate ROE for all companies and show correlation with revenue",
+    #     "Filter to 2020-2023, compute 3-year rolling averages, and create a report",
+    # ]
 
-    results = agent.batch_query(queries, show_plan=False)
+    # results = agent.batch_query(queries, show_plan=False)
 
-    agent.show_statistics()
+    # agent.show_statistics()
 
     # Example 4: Interactive mode (uncomment to try)
-    # interactive_mode()
+    interactive_mode()

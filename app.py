@@ -25,7 +25,52 @@ st.set_page_config(
     page_title="Financial Consultant", layout="wide", initial_sidebar_state="expanded"
 )
 
+
+# ============================================================
+# Session State Initialization - MUST BE FIRST
+# ============================================================
+
+
+def initialize_session_state():
+    """Initialize all session state variables."""
+    if "agent" not in st.session_state:
+        st.session_state.agent = FinancialAnalysisAgent(
+            data_path="data/processed.csv", model="mistral:latest", verbose=False
+        )
+
+    if "execution_history" not in st.session_state:
+        st.session_state.execution_history = []
+
+    if "show_advanced" not in st.session_state:
+        st.session_state.show_advanced = False
+
+    if "last_state" not in st.session_state:
+        st.session_state.last_state = None
+
+    if "last_query" not in st.session_state:
+        st.session_state.last_query = ""
+
+    if "report_generated" not in st.session_state:
+        st.session_state.report_generated = False
+
+    if "report_path" not in st.session_state:
+        st.session_state.report_path = None
+
+    if "report_data" not in st.session_state:
+        st.session_state.report_data = None
+
+    if "query_counter" not in st.session_state:
+        st.session_state.query_counter = 0
+
+
+# Initialize session state BEFORE any other code
+initialize_session_state()
+
+
+# ============================================================
 # Custom CSS
+# ============================================================
+
 st.markdown(
     """
     <style>
@@ -71,40 +116,6 @@ st.markdown(
     """,
     unsafe_allow_html=True,
 )
-
-
-# ============================================================
-# Session State Initialization
-# ============================================================
-
-if "agent" not in st.session_state:
-    st.session_state.agent = FinancialAnalysisAgent(
-        data_path="data/processed.csv", model="mistral:latest", verbose=False
-    )
-
-if "execution_history" not in st.session_state:
-    st.session_state.execution_history = []
-
-if "query_counter" not in st.session_state:
-    st.session_state.query_counter = 0
-
-if "show_advanced" not in st.session_state:
-    st.session_state.show_advanced = False
-
-if "last_state" not in st.session_state:
-    st.session_state.last_state = None
-
-if "last_query" not in st.session_state:
-    st.session_state.last_query = ""
-
-if "report_generated" not in st.session_state:
-    st.session_state.report_generated = False
-
-if "report_path" not in st.session_state:
-    st.session_state.report_path = None
-
-if "report_data" not in st.session_state:
-    st.session_state.report_data = None
 
 
 # ============================================================
@@ -310,6 +321,7 @@ if user_input:
 
                 # Show warnings if any
                 if result.warnings:
+                    st.markdown("---")
                     display_warnings(result.warnings)
                     st.markdown("---")
 
