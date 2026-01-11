@@ -15,12 +15,7 @@ AI-powered financial data analysis agent using Mistral LLM via Ollama. Query fin
 
 ## Architecture Overview
 
-### Previous Architecture (Single Action)
-```
-User Query → Planner → Single Action → Executor → Result
-```
-
-### New Architecture (Sequential)
+### Architecture (Sequential)
 ```
 User Query → Planner → Multi-Step Plan → Sequential Executor → Results
                                               ↓
@@ -52,46 +47,6 @@ User Query → Planner → Multi-Step Plan → Sequential Executor → Results
    - Displays results progressively
    - Tracks execution history
    - Provides usage statistics
-
-## Recent Improvements
-
-### Intelligence Enhancements
-
-#### 1. **Automatic JSON Repair**
-The planner now automatically repairs common JSON errors:
-- Removes markdown code blocks
-- Fixes trailing commas
-- Replaces invalid variables with safe values
-- Wraps arrays in `{"steps": [...]}` structure
-
-#### 2. **Proactive Data Validation**
-Before each operation, the system validates:
-- **For trends**: Sufficient time periods?
-- **For comparisons**: Multiple comparable companies?
-- **For ratios**: Non-zero denominators?
-- **For correlations**: Enough complete observations?
-
-#### 3. **Intelligent Error Recovery**
-When a metric is invalid:
-```python
-# If "profit_margin" lacks sufficient data...
-# System automatically searches for alternatives:
-find_plottable_metric(df, preferred="profit_margin")
-# → Returns "net_income" or best available metric
-```
-
-#### 4. **Retry with Feedback**
-If LLM generates invalid plan:
-```python
-# Attempt 1: Plan with error
-# System: "Missing required parameter 'year' in compare_companies"
-
-# Attempt 2: LLM receives feedback
-user_query + "\n\nPREVIOUS ATTEMPT FAILED: Missing 'year'. 
-REMEMBER: compare_companies needs both 'metric' AND 'year'"
-
-# Attempt 3: Corrected plan
-```
 
 ## Project Structure
 
@@ -158,7 +113,7 @@ python agent/orchestrator.py
 
 ## Usage
 
-### Streamlit App (Recommended)
+### Streamlit App
 
 ```bash
 streamlit run app.py
@@ -299,16 +254,6 @@ This generates:
 ```
 This generates ~6 steps with sequential state management.
 
-### Comparative Analysis
-```
-"Compare company 1's ROE against its industry in 2020"
-"Which companies have the highest revenue in 2023?"
-```
-
-### Batch Queries
-```
-"Show me summary stats for revenue and assets in 2023, then export to CSV"
-```
 
 ## State Management
 
@@ -561,27 +506,6 @@ growth_tools = search_tools_by_keyword("growth")
 meta = get_tool_metadata("yoy_growth")
 ```
 
-## Future Enhancements
-
-- [ ] Add more financial metrics (P/E ratio, debt ratios, etc.)
-- [ ] Support for custom metric definitions
-- [ ] Multi-year comparative analysis
-- [ ] Industry sector analysis
-- [ ] Forecasting and trend prediction
-- [ ] API endpoint for programmatic access
-- [ ] Parallel execution of independent steps
-- [ ] Persistent memory across sessions
-- [ ] Integration with external data sources
-- [ ] Real-time data streaming support
-
-## Contributing
-
-Contributions welcome! Please:
-1. Fork the repository
-2. Create a feature branch
-3. Add tests for new functionality
-4. Submit a pull request
-
 ## License
 
 MIT License - feel free to use and modify for your needs
@@ -601,8 +525,8 @@ If you use this agent in your research or project, please cite:
 ```bibtex
 @software{financial_analysis_agent,
   title = {Financial Analysis Agent with Sequential LLM Planning},
-  author = {Your Name},
-  year = {2025},
+  author = {Pizzetti, Prata Leal, Trelles},
+  year = {2026},
   url = {https://github.com/yourusername/financial-analysis-agent}
 }
 ```
@@ -610,6 +534,6 @@ If you use this agent in your research or project, please cite:
 ---
 
 **Version**: 2.0 (Sequential Agent Architecture)  
-**Last Updated**: January 2025  
+**Last Updated**: January 2026 
 **Python Version**: 3.12+  
 **License**: MIT
