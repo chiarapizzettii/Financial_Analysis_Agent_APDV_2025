@@ -108,7 +108,7 @@ python scripts/clean_dataset.py
 
 ```bash
 # Test the agent
-python agent/orchestrator.py
+python -m src.agent.orchestrator
 ```
 
 ## Usage
@@ -124,13 +124,7 @@ Then open your browser to `http://localhost:8501`
 ### CLI Interface
 
 ```bash
-python agent/orchestrator.py
-```
-
-Or use interactive mode:
-```python
-from agent.orchestrator import interactive_mode
-interactive_mode()
+python -m src.agent.orchestrator
 ```
 
 ### Programmatic Usage
