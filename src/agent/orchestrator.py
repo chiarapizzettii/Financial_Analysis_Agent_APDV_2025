@@ -96,7 +96,7 @@ class FinancialAnalysisAgent:
             print("⚙️  Executing steps:\n")
 
         result = execute_sequential_plan(
-            plan, data_path=self.data_path, verbose=self.verbose
+            plan, data_path=self.data_path, verbose=self.verbose, user_query=user_query
         )
 
         # Step 3: Handle results

@@ -183,12 +183,12 @@ VISUALIZATION OPERATIONS:
 REPORTING OPERATIONS:
 --------------------
 
-11. create_report
-    Description: Generate a comprehensive report with all previous results
-    Required: title (string)
-    Optional: sections (list of section names to include)
-    Example: {"action": "create_report", "title": "Q4 Financial Analysis", "sections": ["summary", "visualizations"]}
-    Use when: User wants final compiled output
+11. generate_report
+    Description: Generate a comprehensive PDF report with all analysis results
+    Required: none (uses accumulated state)
+    Optional: custom_filename (string)
+    Example: {"action": "generate_report", "custom_filename": "Q4_Analysis"}
+    Use when: User wants a downloadable PDF report of the analysis
 
 ═══════════════════════════════════════════════════════════
 SEQUENTIAL PLANNING RULES
@@ -367,6 +367,13 @@ def repair_json(content: str) -> str:
         )
         content = content.strip()
 
+    # Check if content is a raw array instead of {"steps": [...]}
+    # This happens when LLM returns [{...}, {...}] instead of {"steps": [{...}, {...}]}
+    content_stripped = content.strip()
+    if content_stripped.startswith("[") and content_stripped.endswith("]"):
+        # Wrap in steps object
+        content = f'{{"steps": {content}}}'
+
     # Remove trailing commas before closing brackets/braces
     content = re.sub(r",(\s*[}\]])", r"\1", content)
 
@@ -413,6 +420,7 @@ def create_plan(
         ValueError: If planner returns invalid JSON or invalid plan
     """
     last_error = None
+    original_query = user_query
 
     for attempt in range(max_retries + 1):
         try:
@@ -456,8 +464,19 @@ def create_plan(
                 # On retry, give the LLM feedback about the error
                 print(f"⚠️  Attempt {attempt + 1} failed, retrying... ({str(e)[:100]})")
 
-                # Add error feedback to the query
-                user_query = f"{user_query}\n\nIMPORTANT: Previous attempt failed. {str(e)[:200]}"
+                # Add specific error feedback to help LLM fix the issue
+                error_msg = str(e)
+
+                if "missing required parameters" in error_msg:
+                    # Extract which parameters are missing
+                    feedback = f"\n\nPREVIOUS ATTEMPT FAILED: {error_msg}\nREMEMBER: compare_companies ALWAYS needs both 'metric' AND 'year' parameters. If year is mentioned in the query, include it!"
+                elif "missing 'steps' array" in error_msg:
+                    feedback = f"\n\nPREVIOUS ATTEMPT FAILED: You returned a raw array. WRAP IT: {{'steps': [your steps here]}}"
+                else:
+                    feedback = f"\n\nPREVIOUS ATTEMPT FAILED: {error_msg}"
+
+                # Retry with enhanced query
+                user_query = original_query + feedback
             else:
                 # Final attempt failed
                 raise ValueError(
@@ -489,6 +508,18 @@ def _validate_plan(plan: Dict[str, Any]) -> None:
     if len(plan["steps"]) == 0:
         raise ValueError("Plan must have at least one step")
 
+    # Extract year from filter steps if present (for auto-fixing compare_companies)
+    extracted_year = None
+    for step in plan["steps"]:
+        if step.get("action") == "filter_data" and "conditions" in step:
+            for condition in step["conditions"]:
+                if (
+                    condition.get("column") == "year"
+                    and condition.get("operator") == "=="
+                ):
+                    extracted_year = condition.get("value")
+                    break
+
     # Validate each step
     for i, step in enumerate(plan["steps"]):
         if not isinstance(step, dict):
@@ -496,6 +527,14 @@ def _validate_plan(plan: Dict[str, Any]) -> None:
 
         if "action" not in step:
             raise ValueError(f"Step {i} missing 'action' field: {step}")
+
+        # Auto-fix: add year to compare_companies if missing but can be extracted
+        if (
+            step["action"] == "compare_companies"
+            and "year" not in step
+            and extracted_year is not None
+        ):
+            step["year"] = extracted_year
 
         _validate_step(step, step_num=i)
 
@@ -521,7 +560,8 @@ def _validate_step(step: Dict[str, Any], step_num: int) -> None:
         "compare_companies": ["metric", "year"],
         "correlation": ["metrics"],
         # Reporting
-        "create_report": ["title"],
+        "generate_report": [],  # No required params
+        "create_report": ["title"],  # Legacy
     }
 
     if action not in required_params:

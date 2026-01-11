@@ -4,7 +4,7 @@
 Sequential Financial Analysis Streamlit App
 -------------------------------------------
 
-Supports multi-step workflows with state visualization.
+Supports multi-step workflows with state visualization and PDF reporting.
 """
 
 import os
@@ -87,6 +87,15 @@ if "execution_history" not in st.session_state:
 
 if "show_advanced" not in st.session_state:
     st.session_state.show_advanced = False
+
+if "last_state" not in st.session_state:
+    st.session_state.last_state = None
+
+if "last_query" not in st.session_state:
+    st.session_state.last_query = ""
+
+if "query_counter" not in st.session_state:
+    st.session_state.query_counter = 0
 
 
 # ============================================================
@@ -202,18 +211,6 @@ def display_warnings(warnings):
         st.warning(warning)
 
 
-def display_warnings(warnings):
-    """Display warning messages."""
-
-    if not warnings:
-        return
-
-    st.markdown("### ⚠️ Warnings")
-
-    for warning in warnings:
-        st.warning(warning)
-
-
 # ============================================================
 # Main Interface
 # ============================================================
@@ -245,11 +242,11 @@ user_input = st.text_input(
     label="Query Input",
     label_visibility="collapsed",
     placeholder="e.g., Filter to companies 1-5, calculate profit margins, plot trends, and export to CSV",
-    key="query_input",
+    key=f"query_input_{st.session_state.query_counter}",
 )
 
 # Execution controls
-col1, col2, col3 = st.columns([2, 1, 1])
+col1, col2, col3, col4 = st.columns([1.5, 1, 1, 1])
 
 with col2:
     show_plan = st.checkbox("Show Plan", value=True)
@@ -258,6 +255,11 @@ with col3:
     st.session_state.show_advanced = st.checkbox(
         "Advanced View", value=st.session_state.show_advanced
     )
+
+with col4:
+    if st.button("🔄 Clear Input", use_container_width=True):
+        st.session_state.query_counter += 1
+        st.rerun()
 
 # Process query
 if user_input:
@@ -278,7 +280,10 @@ if user_input:
             from src.agent.executor import execute_sequential_plan
 
             result = execute_sequential_plan(
-                plan, data_path="data/processed.csv", verbose=False
+                plan,
+                data_path="data/processed.csv",
+                verbose=False,
+                user_query=user_input,
             )
 
             # Display results
@@ -297,6 +302,10 @@ if user_input:
                 # Display execution state
                 display_execution_state(result.state)
 
+                # Store state for report generation
+                st.session_state.last_state = result.state
+                st.session_state.last_query = user_input
+
                 # Save to history
                 st.session_state.execution_history.append(
                     {
@@ -306,6 +315,55 @@ if user_input:
                         "summary": result.state.get_summary(),
                     }
                 )
+
+                # Add prominent "Download Report" button after results
+                st.markdown("---")
+
+                col1, col2, col3 = st.columns([1, 2, 1])
+
+                with col2:
+                    if st.button(
+                        "📥 Download PDF Report",
+                        use_container_width=True,
+                        type="primary",
+                        key="download_report_main",
+                    ):
+                        with st.spinner("Generating PDF report..."):
+                            from src.tools.reporting import generate_report_from_state
+
+                            try:
+                                report_path = generate_report_from_state(
+                                    state=result.state,
+                                    user_query=user_input,
+                                    output_dir="outputs",
+                                )
+
+                                # Provide download link
+                                with open(report_path, "rb") as f:
+                                    pdf_data = f.read()
+
+                                st.download_button(
+                                    label="💾 Click Here to Download PDF",
+                                    data=pdf_data,
+                                    file_name=Path(report_path).name,
+                                    mime="application/pdf",
+                                    use_container_width=True,
+                                    type="primary",
+                                    key="download_pdf_file",
+                                )
+
+                                st.success(f"✅ Report generated successfully!")
+
+                            except Exception as e:
+                                st.error(f"Report generation failed: {str(e)}")
+
+                                import traceback
+
+                                with st.expander("Show Error Details"):
+                                    st.code(traceback.format_exc())
+
+                # Clear input for next query
+                st.session_state.query_counter += 1
 
             else:
                 st.markdown(
@@ -417,17 +475,79 @@ with st.sidebar:
     # Actions
     st.markdown("### ⚙️ Actions")
 
-    if st.button("🗑️ Clear History", use_container_width=True):
-        st.session_state.execution_history = []
-        st.session_state.agent.clear_history()
-        st.rerun()
+    st.info(
+        "💡 After running a query, click the blue button below the results to download a PDF report!"
+    )
 
-    if st.button("📊 Show Statistics", use_container_width=True):
-        st.session_state.agent.show_statistics()
+    st.markdown("---")
+
+    col1, col2 = st.columns(2)
+
+    with col1:
+        if st.button(
+            "📄 Generate Report\n(Sidebar)",
+            use_container_width=True,
+            disabled=st.session_state.last_state is None,
+            help="Generate PDF from last analysis",
+        ):
+            if st.session_state.last_state:
+                with st.spinner("Generating comprehensive PDF report..."):
+                    from src.tools.reporting import generate_report_from_state
+
+                    # Get the last query from history
+                    last_query = st.session_state.last_query
+
+                    try:
+                        report_path = generate_report_from_state(
+                            state=st.session_state.last_state,
+                            user_query=last_query,
+                            output_dir="outputs",
+                        )
+
+                        st.success(f"✅ Report generated!")
+
+                        # Provide download link
+                        with open(report_path, "rb") as f:
+                            pdf_data = f.read()
+
+                        st.download_button(
+                            label="📥 Download PDF",
+                            data=pdf_data,
+                            file_name=Path(report_path).name,
+                            mime="application/pdf",
+                            use_container_width=True,
+                            key="download_sidebar",
+                        )
+                    except Exception as e:
+                        st.error(f"Report generation failed: {str(e)}")
+
+                        import traceback
+
+                        with st.expander("Show Error Details"):
+                            st.code(traceback.format_exc())
+
+    with col2:
+        if st.button("🗑️ Clear History", use_container_width=True):
+            st.session_state.execution_history = []
+            st.session_state.agent.clear_history()
+            st.session_state.last_state = None
+            st.rerun()
 
     if st.button("💾 Export History", use_container_width=True):
         st.session_state.agent.export_history("streamlit_history.json")
         st.success("History exported to outputs/streamlit_history.json")
+
+    if st.button("❌ Quit Application", use_container_width=True, type="secondary"):
+        st.markdown(
+            """
+        <script>
+            window.parent.close();
+        </script>
+        """,
+            unsafe_allow_html=True,
+        )
+        st.warning("⚠️ Close the browser tab to quit the application.")
+        st.stop()
 
     st.markdown("---")
 
@@ -443,6 +563,7 @@ with st.sidebar:
         st.markdown("✅ Sequential execution")
         st.markdown("✅ State management")
         st.markdown("✅ Multi-step workflows")
+        st.markdown("✅ PDF Report Generation")
 
 
 # ============================================================

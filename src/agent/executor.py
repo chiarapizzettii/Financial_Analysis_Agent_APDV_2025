@@ -503,27 +503,48 @@ def _execute_correlation(
 # ============================================================
 
 
+def _execute_generate_report(
+    state: ExecutionState, step: Dict[str, Any], user_query: str = ""
+) -> ExecutionResult:
+    """Generate comprehensive PDF report."""
+
+    from src.tools.reporting import generate_report_from_state
+
+    custom_filename = step.get("custom_filename")
+
+    try:
+        filepath = generate_report_from_state(
+            state=state,
+            user_query=user_query,
+            custom_filename=custom_filename,
+        )
+
+        state.add_export(filepath)
+
+        result = ExecutionResult(success=True, state=state)
+        result.add_warning(f"PDF report generated: {filepath}")
+
+        return result
+
+    except Exception as e:
+        return ExecutionResult(
+            success=False,
+            error=f"Report generation failed: {str(e)}",
+            error_type="ReportGenerationError",
+        )
+
+
 def _execute_create_report(
     state: ExecutionState, step: Dict[str, Any]
 ) -> ExecutionResult:
-    """Create comprehensive report."""
+    """Create comprehensive report (legacy - redirects to generate_report)."""
 
-    title = step["title"]
-    sections = step.get("sections", ["all"])
+    title = step.get("title", "Financial Analysis")
 
-    # For now, just compile everything into state metadata
-    state.metadata["report"] = {
-        "title": title,
-        "sections": sections,
-        "summary": state.get_summary(),
-    }
-
-    result = ExecutionResult(success=True, state=state)
-    result.add_warning(
-        f"Report '{title}' compiled with {len(state.visualizations)} visualizations"
+    # Convert to generate_report call
+    return _execute_generate_report(
+        state, {"custom_filename": title.replace(" ", "_")}, user_query=title
     )
-
-    return result
 
 
 # ============================================================
@@ -542,12 +563,16 @@ STEP_EXECUTORS = {
     "plot_trend": _execute_plot_trend,
     "compare_companies": _execute_compare_companies,
     "correlation": _execute_correlation,
-    "create_report": _execute_create_report,
+    "generate_report": _execute_generate_report,
+    "create_report": _execute_create_report,  # Legacy support
 }
 
 
 def execute_sequential_plan(
-    plan: Dict[str, Any], data_path: str = "data/processed.csv", verbose: bool = True
+    plan: Dict[str, Any],
+    data_path: str = "data/processed.csv",
+    verbose: bool = True,
+    user_query: str = "",
 ) -> ExecutionResult:
     """
     Execute a multi-step plan sequentially.
@@ -561,6 +586,7 @@ def execute_sequential_plan(
         plan: Plan dict with "steps" array
         data_path: Path to initial data
         verbose: Print progress messages
+        user_query: Original user query (for report generation)
 
     Returns:
         ExecutionResult with final state or error
@@ -569,6 +595,7 @@ def execute_sequential_plan(
     try:
         initial_df = load_processed_data(data_path)
         state = ExecutionState(initial_df)
+        state.metadata["user_query"] = user_query
     except Exception as e:
         return ExecutionResult(
             success=False,
@@ -603,8 +630,11 @@ def execute_sequential_plan(
                 error_type="UnknownAction",
             )
 
-        # Execute step
-        step_result = STEP_EXECUTORS[action](state, step)
+        # Execute step (pass user_query for report generation)
+        if action == "generate_report":
+            step_result = STEP_EXECUTORS[action](state, step, user_query)
+        else:
+            step_result = STEP_EXECUTORS[action](state, step)
 
         if not step_result.success:
             if verbose:
