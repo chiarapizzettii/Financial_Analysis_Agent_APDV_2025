@@ -1,17 +1,21 @@
 # Financial Analysis Agent 📊
 
-## TO CHANGE
+AI-powered financial data analysis agent using Mistral LLM via Ollama. Query financial data using natural language and get comprehensive analysis with visualizations.
 
-# Sequential Financial Analysis Agent - Usage Guide
+## Features
 
-## 🎯 What Changed?
+- 🤖 **Natural Language Interface**: Ask questions in plain English
+- 🔄 **Sequential Multi-Step Execution**: Plans break down into logical steps with state management
+- 📊 **Automated Visualizations**: Revenue trends, profitability ratios, comparative analysis
+- 🧠 **Intelligent Planning**: Mistral LLM creates optimal execution plans
+- ✅ **Robust Validation**: Verifies data quality before operations
+- 📄 **PDF Report Generation**: Professional reports with analysis and visualizations
+- 📈 **Interactive Dashboard**: Streamlit-based UI with chat interface
+- 🛠️ **Extensible Tools**: Modular plotting and calculation functions
 
-### Previous Architecture (Single Action)
-```
-User Query → Planner → Single Action → Executor → Result
-```
+## Architecture Overview
 
-### New Architecture (Sequential)
+### Architecture (Sequential)
 ```
 User Query → Planner → Multi-Step Plan → Sequential Executor → Results
                                               ↓
@@ -19,40 +23,119 @@ User Query → Planner → Multi-Step Plan → Sequential Executor → Results
                                     (DataFrame, visualizations, tables)
 ```
 
-## 📋 Architecture Overview
+### Core Components
 
-### 1. **Planner** (`agent/planner.py`)
-**Changed**: Now outputs `{"steps": [...]}` instead of single action
+1. **Planner** (`agent/planner.py`)
+   - Uses Mistral LLM to create multi-step execution plans
+   - Outputs `{"steps": [...]}` instead of single action
+   - Validates all steps upfront
+   - Supports 11 different action types
+   - Automatic JSON repair and retry logic
 
-- Creates multi-step execution plans
-- Each step can use outputs from previous steps
-- Validates all steps upfront
-- Supports 11 different action types
+2. **Executor** (`agent/executor.py`)
+   - Maintains `ExecutionState` across steps:
+     - Current DataFrame (modified by each step)
+     - Generated visualizations
+     - Summary tables
+     - Exported files
+   - Executes steps sequentially
+   - Comprehensive error handling per step
+   - Proactive data validation
 
-### 2. **Executor** (`agent/executor.py`)
-**Changed**: Now maintains state across steps
+3. **Orchestrator** (`agent/orchestrator.py`)
+   - Manages the complete pipeline
+   - Displays results progressively
+   - Tracks execution history
+   - Provides usage statistics
 
-- `ExecutionState` class tracks:
-  - Current DataFrame (modified by each step)
-  - Generated visualizations
-  - Summary tables
-  - Exported files
-  
-- Executes steps sequentially
-- Each step updates state for next step
-- Comprehensive error handling per step
+## Project Structure
 
-### 3. **Orchestrator** (`agent/orchestrator.py`)
-**Changed**: Now coordinates multi-step execution
+```
+.
+├── agent/                  # Agent core logic
+│   ├── orchestrator.py     # Main orchestrator
+│   ├── planner.py          # LLM-based planning
+│   └── executor.py         # Tool execution with state management
+├── tools/                  # Analysis tools
+│   ├── visualization.py    # Plotly visualizations
+│   ├── tool_mapping.py     # Tool registry
+│   ├── reporting.py        # PDF report generation
+│   └── analysis.py         # Financial calculations
+├── scripts/               # Setup scripts
+│   └── clean_dataset.py   # Data preprocessing
+├── data/                  # Data directory
+│   ├── processed.csv      # Processed data
+│   └── raw.csv            # Raw CSV data
+└── app.py                 # Streamlit app
+```
 
-- Manages the complete pipeline
-- Displays results progressively
-- Tracks execution history
-- Provides usage statistics
+## Setup
 
-## 🚀 Usage Examples
+### Prerequisites
 
-### Example 1: Simple Sequential Workflow
+- Python 3.12+
+- Ollama
+- Mistral model for Ollama
+
+### 1. Install Dependencies
+
+```bash
+pip install polars plotly streamlit requests ollama fpdf kaleido
+```
+
+### 2. Install and Setup Ollama
+
+```bash
+# Install Ollama (macOS/Linux)
+curl -fsSL https://ollama.ai/install.sh | sh
+
+# Start Ollama server
+ollama serve
+
+# In another terminal, pull Mistral
+ollama pull mistral
+```
+
+### 3. Prepare Data
+
+```bash
+# Place your financial data CSV in data/raw.csv
+# Run preprocessing
+python scripts/clean_dataset.py
+```
+
+### 4. Verify Setup
+
+```bash
+# Test the agent
+python agent/orchestrator.py
+```
+
+## Usage
+
+### Streamlit App
+
+```bash
+streamlit run app.py
+```
+
+Then open your browser to `http://localhost:8501`
+
+### CLI Interface
+
+```bash
+python agent/orchestrator.py
+```
+
+Or use interactive mode:
+```python
+from agent.orchestrator import interactive_mode
+interactive_mode()
+```
+
+### Programmatic Usage
+
+#### Simple Query
 ```python
 from agent.orchestrator import quick_query
 
@@ -60,57 +143,27 @@ state = quick_query(
     "Filter to companies 1-5, calculate profit margins, and plot the trend"
 )
 
-# Behind the scenes, this creates a plan like:
-{
-  "steps": [
-    {
-      "action": "filter_data",
-      "conditions": [{"column": "company_id", "operator": "in", "value": [1,2,3,4,5]}]
-    },
-    {
-      "action": "compute_margin",
-      "numerator": "net_income",
-      "denominator": "revenue",
-      "output_col": "profit_margin"
-    },
-    {
-      "action": "plot_trend",
-      "metric": "profit_margin"
-    }
-  ]
-}
+# Access results
+print(f"Visualizations: {len(state.visualizations)}")
+print(f"Tables: {len(state.tables)}")
+print(f"Exports: {state.exports}")
 ```
 
-### Example 2: Data Analysis Pipeline
-```python
-state = quick_query(
-    "Filter to 2023, show summary statistics for revenue and assets, "
-    "then export to CSV"
-)
-
-# Access results:
-print(f"Tables generated: {len(state.tables)}")
-print(f"Files exported: {state.exports}")
-```
-
-### Example 3: Complex Multi-Step Analysis
+#### Agent Instance
 ```python
 from agent.orchestrator import FinancialAnalysisAgent
 
-agent = FinancialAnalysisAgent()
+agent = FinancialAnalysisAgent(verbose=True)
 
 state = agent.query(
-    "Filter to years 2020-2023, compute ROE for each company, "
-    "calculate 3-year rolling averages, plot the trends, "
-    "show correlation with revenue, and create a comprehensive report"
+    "Filter to 2020-2023, compute ROE, plot trends, and create report"
 )
 
-# The planner will create ~5-6 steps
-# The executor will run them sequentially
-# Results accumulate in the state
+# Show statistics
+agent.show_statistics()
 ```
 
-### Example 4: Batch Processing
+#### Batch Processing
 ```python
 agent = FinancialAnalysisAgent()
 
@@ -121,46 +174,88 @@ queries = [
 ]
 
 results = agent.batch_query(queries)
-
-# Show statistics
-agent.show_statistics()
 ```
 
-### Example 5: Interactive Mode
-```python
-from agent.orchestrator import interactive_mode
-
-interactive_mode()
-
-# Then type queries like:
-# "Filter to tech companies and plot revenue trends"
-# "Calculate YoY growth and export to CSV"
-# "stats" - to see usage
-# "quit" - to exit
-```
-
-## 🔧 Available Actions (11 Total)
+## Available Actions (11 Total)
 
 ### Data Operations
-1. **filter_data** - Subset data by conditions
-2. **compute_summary_stats** - Calculate mean, median, std, etc.
-3. **export_table** - Save to CSV/Excel
+
+1. **filter_data**
+   - Subset data by conditions
+   - Example: `{"action": "filter_data", "conditions": [{"column": "year", "operator": ">=", "value": 2020}]}`
+
+2. **compute_summary_stats**
+   - Calculate mean, median, std, etc.
+   - Example: `{"action": "compute_summary_stats", "columns": ["revenue", "net_income"], "group_by": "year"}`
+
+3. **export_table**
+   - Save to CSV/Excel
+   - Example: `{"action": "export_table", "format": "csv", "filename": "results.csv"}`
 
 ### Analysis Operations
-4. **yoy_growth** - Year-over-year growth rates
-5. **rolling_average** - Moving averages
-6. **compute_margin** - Ratios between metrics
-7. **compute_share** - Percentage calculations
+
+4. **yoy_growth**
+   - Year-over-year growth rates
+   - Example: `{"action": "yoy_growth", "metric": "revenue", "periods": 1}`
+
+5. **rolling_average**
+   - Moving averages
+   - Example: `{"action": "rolling_average", "metric": "revenue", "window": 3}`
+
+6. **compute_margin**
+   - Ratios between metrics
+   - Example: `{"action": "compute_margin", "numerator": "net_income", "denominator": "revenue", "output_col": "profit_margin"}`
+
+7. **compute_share**
+   - Percentage calculations
+   - Example: `{"action": "compute_share", "value_col": "segment_revenue", "total_col": "total_revenue", "output_col": "market_share"}`
 
 ### Visualization Operations
-8. **plot_trend** - Time series line charts
-9. **compare_companies** - Cross-sectional bar charts
-10. **correlation** - Correlation heatmaps
+
+8. **plot_trend**
+   - Time series line charts
+   - Example: `{"action": "plot_trend", "metric": "revenue", "company_ids": [1, 2, 3]}`
+
+9. **compare_companies**
+   - Cross-sectional bar charts
+   - Example: `{"action": "compare_companies", "metric": "net_income", "year": 2023}`
+
+10. **correlation**
+    - Correlation heatmaps
+    - Example: `{"action": "correlation", "metrics": ["revenue", "net_income", "total_assets"]}`
 
 ### Reporting
-11. **create_report** - Compile all results
 
-## 📊 State Management
+11. **generate_report**
+    - Compile comprehensive PDF reports
+    - Example: `{"action": "generate_report", "custom_filename": "Q4_Analysis"}`
+
+## Example Queries
+
+### Basic Analysis
+```
+"Show me the revenue trend for companies 1, 2, and 3 from 2015 to 2020"
+```
+
+### Multi-Step Workflow
+```
+"Filter to companies 1-5, calculate profit margins, and plot the trend"
+```
+This generates:
+1. filter_data (companies 1-5)
+2. compute_margin (net_income / revenue)
+3. plot_trend (profit_margin)
+
+### Complex Analysis
+```
+"Filter to 2020-2023, compute ROE for each company, 
+ calculate 3-year rolling averages, plot the trends, 
+ show correlation with revenue, and create a comprehensive report"
+```
+This generates ~6 steps with sequential state management.
+
+
+## State Management
 
 ### ExecutionState Class
 ```python
@@ -195,235 +290,90 @@ Step 4: export_table
   State: export path added
 ```
 
-## 🎨 Example Workflows
+## Available Metrics (95 Total)
 
-### Workflow 1: Financial Ratio Analysis
-```
-User: "Calculate profit margins for 2023 and compare top 5 companies"
+### Financial Basics
+`revenue`, `net_income`, `total_assets`, `equity`, `total_debt`, `total_liabilities`
 
-Plan:
-1. filter_data (year == 2023)
-2. compute_margin (net_income / revenue)
-3. filter_data (top 5 by margin)
-4. compare_companies (profit_margin, 2023)
-```
+### Ratios
+`roe`, `roa`, `current_ratio`, `quick_ratio`, `leverage`, `asset_leverage`, `equity_leverage`
 
-### Workflow 2: Time Series Analysis
-```
-User: "Show 3-year moving average of revenue for companies 1-10"
+### Margins
+`gross_margin`, `operating_margin`, `net_sales_margin`
 
-Plan:
-1. filter_data (company_id in [1...10])
-2. rolling_average (revenue, window=3)
-3. plot_trend (revenue_rolling_3)
-```
+### Efficiency
+`asset_turnover`, `fixed_assets_turnover`, `receivables_turnover`, `interest_coverage`
 
-### Workflow 3: Comprehensive Report
-```
-User: "Filter to 2020-2023, compute ROE, show stats and trends, export everything"
+### Other
+`employee_count`, `company_size`, `ranking`, `year`, `company_id`
 
-Plan:
-1. filter_data (2020 <= year <= 2023)
-2. compute_margin (net_income / equity → ROE)
-3. compute_summary_stats (ROE, group_by=year
+See `planner.py` for complete list of 95 available metrics.
 
+## Advanced Features
 
-AI-powered financial data analysis agent using Mistral LLM via Ollama. Query financial data using natural language and get comprehensive analysis with visualizations.
-
-## Features
-
-- 🤖 **Natural Language Interface**: Ask questions in plain English
-- 📈 **Automated Visualizations**: Revenue trends, profitability ratios, comparative analysis
-- 🔍 **Intelligent Planning**: Mistral LLM creates optimal execution plans
-- 📊 **Interactive Dashboard**: Streamlit-based UI with chat interface
-- 🛠️ **Extensible Tools**: Modular plotting and calculation functions
-
-## Project Structure
-
-```
-.
-├── agent/                  # Agent core logic
-│   ├── orchestrator.py     # Main orchestrator
-│   ├── planner.py          # LLM-based planning
-│   ├── executor.py         # Tool execution
-├── tools/                  # Analysis tools
-│   ├── visualization.py    # Plotly visualizations
-│   ├── mapping.py          # Tool mapping
-│   ├── reporting.py        # Report creation
-│   └── analysis.py         # Financial calculations
-├── scripts/               # Setup scripts
-│   └── clean_dataset.py   # Data preprocessing
-├── data/                  # Data directory
-│   ├── processed.csv      # Processed data
-│   └── raw.csv            # Raw CSV data
-└── app.py                 # Streamlit app
-
+### Automatic Metric Fallback
+When requested metric lacks sufficient data:
+```python
+# User requests: "plot_trend" for "profit_margin"
+# System detects: insufficient data points
+# Action: Automatically finds alternative (e.g., "net_income")
+# User sees: Warning message + plot with alternative metric
 ```
 
-## Setup
+### Plan Validation
+All plans are validated before execution:
+- Required parameters present
+- Metrics exist in dataset
+- Filter conditions valid
+- Year references correct
 
-### Prerequisites
-
-- Python 3.12+
-- Ollama
-- Mistral model for Ollama
-
-### 1. Install Dependencies
-
-```bash
-pip install polars plotly streamlit requests
+### Error Recovery
+```python
+try:
+    state = agent.query("ambiguous query")
+except ValidationError as e:
+    # Insufficient data
+    print(f"Data validation failed: {e}")
+except VisualizationError as e:
+    # Cannot create plot
+    print(f"Visualization failed: {e}")
+except ValueError as e:
+    # Invalid parameters
+    print(f"Invalid input: {e}")
 ```
-
-### 2. Install and Setup Ollama
-
-```bash
-# Install Ollama (macOS/Linux)
-curl -fsSL https://ollama.ai/install.sh | sh
-
-# Start Ollama server
-ollama serve
-
-# In another terminal, pull Mistral
-ollama pull mistral
-```
-
-### 3. Initialize Database
-
-```bash
-# Create database from CSV
-python scripts/init_db.py
-
-# Normalize into proper tables
-python scripts/normalize_db.py
-```
-
-### 4. Verify Setup
-
-```bash
-# Test the CLI agent
-python agent/runner.py
-```
-
-## Usage
-
-### Streamlit App (Recommended)
-
-```bash
-streamlit run app.py
-```
-
-Then open your browser to `http://localhost:8501`
-
-### CLI Interface
-
-```bash
-python agent/runner.py
-```
-
-### Example Queries
-
-**Revenue Analysis:**
-- "Show me the revenue trend for companies 1, 2, and 3 from 2015 to 2020"
-- "How has company 1's revenue grown from 2015 to 2020?"
-
-**Profitability Analysis:**
-- "Compare the ROE of companies 1, 2, 3 in 2020"
-- "What is the average ROA across all companies in 2020?"
-- "Show profitability ratios for company 1 from 2018 to 2020"
-
-**Comparative Analysis:**
-- "Compare company 1's ROE against its industry in 2020"
-- "Which companies have the highest revenue in 2020?"
-
-**Dashboards:**
-- "Show me a dashboard for company 1 in 2020"
-- "Create a financial health overview for company 5 in 2019"
-
-## Available Tools
-
-### Plotting Tools
-
-- `plot_revenue_trend()` - Revenue over time
-- `plot_profitability()` - ROE, ROA, Net Margin
-- `plot_net_income_trend()` - Net income over time
-- `plot_comparison()` - Compare companies on a metric
-- `plot_industry_benchmark()` - Company vs industry
-- `plot_dashboard()` - Comprehensive financial dashboard
-- `plot_correlation()` - Metric correlations
-
-### Calculation Tools
-
-- `query_database()` - Execute SQL queries
-- `calculate_growth_rate()` - CAGR and growth metrics
-- `calculate_aggregate_stats()` - Statistical aggregations
 
 ## Configuration
 
-Edit `utils/config.py` or set environment variables:
-
+### Environment Variables
 ```bash
-export FINANCE_DB_PATH="../data/finance.db"
+export FINANCE_DB_PATH="data/finance.db"
 export OLLAMA_URL="http://localhost:11434"
-export OLLAMA_MODEL="mistral"
+export OLLAMA_MODEL="mistral:latest"
 export AGENT_MAX_RETRIES=2
 ```
 
-## Architecture
+### Config File
+Edit `config.py` for additional settings:
+- Data paths
+- Model parameters
+- Retry logic
+- Validation thresholds
 
-### 1. User Query
-User asks a natural language question via Streamlit or CLI
+## Performance Tips
 
-### 2. Planning Phase
-`AgentPlanner` uses Mistral to:
-- Analyze the query
-- Break it into steps
-- Select appropriate tools
-- Generate execution plan
+- **Limit company_ids**: Query fewer companies for faster responses
+- **Use specific years**: Narrow date ranges reduce processing time
+- **Batch related queries**: Use `batch_query()` for multiple analyses
+- **Cache results**: The agent maintains execution history
 
-### 3. Execution Phase
-`ToolExecutor` runs the plan:
-- Executes SQL queries
-- Generates visualizations
-- Performs calculations
-- Collects results
+## Known Limitations
 
-### 4. Response Generation
-`FinancialAgent` synthesizes:
-- Tool results into natural language
-- Displays plots and tables
-- Returns comprehensive response
-
-## Agent Flow
-
-```
-User Query
-    ↓
-[AgentPlanner]
-    ↓
-Execution Plan
-    ↓
-[ToolExecutor]
-    ↓
-Tool Results
-    ↓
-[Response Generator]
-    ↓
-Final Answer + Visualizations
-```
-
-## Extending the Agent
-
-### Add New Plotting Function
-
-1. Add function to `tools/plotting.py`
-2. Define tool schema in `agent/schema.py`
-3. Add routing in `agent/executor.py`
-
-### Add New Calculation
-
-1. Add function to `tools/calculations.py`
-2. Define tool schema in `agent/schema.py`
-3. Add routing in `agent/executor.py`
+1. **No localStorage**: Runs in standard Python environment (not browser-based)
+2. **Requires local Ollama**: Must have Mistral running locally
+3. **Sequential execution**: Steps execute one at a time (no parallelization)
+4. **Single-user**: No concurrent request handling
+5. **Memory per session**: No persistence between sessions
+6. **Visualization exports**: Requires kaleido for PDF image generation
 
 ## Troubleshooting
 
@@ -439,60 +389,151 @@ ollama serve
 ollama pull mistral
 ```
 
-### "Database not found"
-```bash
-# Check database path
-ls -la data/finance.db
-
-# Reinitialize if needed
-python scripts/init_db.py
-python scripts/normalize_db.py
-```
-
 ### "No module named 'polars'"
 ```bash
 # Install dependencies
-pip install polars plotly streamlit requests
+pip install polars plotly streamlit requests ollama fpdf kaleido
 ```
 
-## Performance Tips
+### "Invalid JSON from planner"
+- The system automatically retries with error feedback
+- Check Ollama is running: `curl http://localhost:11434/api/tags`
+- Verify model is loaded: `ollama list`
 
-- **Limit company_ids**: Query fewer companies for faster responses
-- **Use specific years**: Narrow date ranges reduce processing time
-- **Cache results**: The database has indexes on key columns
+### "Insufficient data for visualization"
+- The system automatically suggests alternative metrics
+- Check data has sufficient non-null values
+- Verify year/company filters aren't too restrictive
 
-## Known Limitations
+## Advanced Usage Examples
 
-- No support for localStorage (runs in standard Python environment)
-- Requires local Ollama installation
-- Database must fit in memory for Polars operations
-- Single-user operation (no concurrent request handling)
+### Profitability Analysis
+```python
+query = """
+Filter to public companies in years 2020-2023,
+compute ROE and ROA for each company-year,
+calculate 2-year rolling averages for both metrics,
+show correlation between ROE and revenue growth,
+plot trends for top 5 companies by average ROE,
+create comparison of 2023 values,
+generate comprehensive PDF report
+"""
 
-## Future Enhancements
+state = agent.query(query)
+# Generates: 7 steps, multiple visualizations, PDF report
+```
 
-- [ ] Add more financial metrics (P/E ratio, debt ratios, etc.)
-- [ ] Support for custom metric definitions
-- [ ] Export reports to PDF/Excel
-- [ ] Multi-year comparative analysis
-- [ ] Industry sector analysis
-- [ ] Forecasting and trend prediction
-- [ ] API endpoint for programmatic access
+### Data Quality Pipeline
+```python
+from agent.orchestrator import FinancialAnalysisAgent
+from tools.analysis import flag_invalid_values, flag_anomalous_margin
+
+agent = FinancialAnalysisAgent()
+
+# The agent can handle quality checks through natural language
+query = """
+Flag invalid values in revenue and assets,
+flag anomalous profit margins,
+compute summary statistics grouped by year,
+export flagged records to CSV for review
+"""
+
+state = agent.query(query)
+```
+
+### Multi-Temporal Comparison
+```python
+query = """
+For companies 1-10:
+- Calculate YoY growth rates for revenue
+- Compute 3-year moving averages
+- Show correlation matrix of key metrics
+- Compare 2023 performance vs 3-year average
+- Export full analysis to Excel
+"""
+
+state = agent.query(query)
+```
+
+## Statistics & Monitoring
+
+```python
+agent = FinancialAnalysisAgent()
+
+# Run multiple queries...
+agent.query("query 1")
+agent.query("query 2")
+
+# Show statistics
+agent.show_statistics()
+
+# Output:
+# Total queries: 15
+# Successful: 13 (86.7%)
+# Planning failed: 1 (6.7%)
+# Execution failed: 1 (6.7%)
+# Average steps per query: 3.2
+# Most used actions:
+#   • filter_data: 13
+#   • plot_trend: 9
+#   • compute_margin: 7
+```
+
+## Tool Registry
+
+See `tools/tool_mapping.py` for comprehensive tool metadata:
+- Function signatures
+- Required/optional parameters
+- Validation requirements
+- Example usage
+- Error types
+
+```python
+from tools.tool_mapping import (
+    TOOL_REGISTRY,
+    get_tool_metadata,
+    search_tools_by_keyword,
+    print_all_tools_summary
+)
+
+# Print all available tools
+print_all_tools_summary()
+
+# Search for specific tools
+growth_tools = search_tools_by_keyword("growth")
+
+# Get detailed metadata
+meta = get_tool_metadata("yoy_growth")
+```
 
 ## License
 
 MIT License - feel free to use and modify for your needs
 
-## Contributing
-
-Contributions welcome! Please:
-1. Fork the repository
-2. Create a feature branch
-3. Add tests for new functionality
-4. Submit a pull request
-
 ## Support
 
 For issues and questions:
 - Check the troubleshooting section above
-- Review example queries in the sidebar
-- Inspect agent execution details in Streamlit
+- Review example queries in this README
+- Inspect agent execution details with `verbose=True`
+- Check tool validation requirements in `tool_mapping.py`
+
+## Citation
+
+If you use this agent in your research or project, please cite:
+
+```bibtex
+@software{financial_analysis_agent,
+  title = {Financial Analysis Agent with Sequential LLM Planning},
+  author = {Pizzetti, Prata Leal, Trelles},
+  year = {2026},
+  url = {https://github.com/yourusername/financial-analysis-agent}
+}
+```
+
+---
+
+**Version**: 2.0 (Sequential Agent Architecture)  
+**Last Updated**: January 2026 
+**Python Version**: 3.12+  
+**License**: MIT
