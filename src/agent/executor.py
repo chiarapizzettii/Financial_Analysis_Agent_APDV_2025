@@ -256,6 +256,62 @@ def _execute_export_table(
         )
 
 
+def _execute_select_top_k(
+    state: ExecutionState, step: Dict[str, Any]
+) -> ExecutionResult:
+    """
+    Select top-k rows based on a metric.
+
+    This is useful for "show top 10 companies" queries.
+    """
+    metric = step["metric"]
+    k = step.get("k", 10)
+    ascending = step.get("ascending", False)
+    year = step.get("year")  # Optional: filter to specific year first
+
+    try:
+        df = state.df
+
+        # If year is specified, filter first
+        if year is not None:
+            df = df.filter(pl.col("year") == year)
+
+        # Check if metric exists
+        if metric not in df.columns:
+            return ExecutionResult(
+                success=False,
+                error=f"Metric '{metric}' not found in dataframe",
+                error_type="ValidationError",
+            )
+
+        # Sort and take top k
+        sorted_df = df.sort(metric, descending=not ascending)
+        top_k_df = sorted_df.head(k)
+
+        if top_k_df.is_empty():
+            return ExecutionResult(
+                success=False,
+                error=f"No data available for metric '{metric}'",
+                error_type="EmptyDataset",
+            )
+
+        state.update_df(top_k_df)
+
+        result = ExecutionResult(success=True, state=state)
+        result.add_warning(
+            f"Selected top {k} rows by '{metric}' ({'ascending' if ascending else 'descending'})"
+        )
+
+        return result
+
+    except Exception as e:
+        return ExecutionResult(
+            success=False,
+            error=str(e),
+            error_type="SelectTopKError",
+        )
+
+
 # ============================================================
 # Step Executors - Analysis Operations
 # ============================================================
@@ -556,6 +612,7 @@ STEP_EXECUTORS = {
     "filter_data": _execute_filter_data,
     "compute_summary_stats": _execute_compute_summary_stats,
     "export_table": _execute_export_table,
+    "select_top_k": _execute_select_top_k,  # NEW
     "yoy_growth": _execute_yoy_growth,
     "rolling_average": _execute_rolling_average,
     "compute_margin": _execute_compute_margin,

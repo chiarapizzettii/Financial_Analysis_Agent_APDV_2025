@@ -212,6 +212,13 @@ CRITICAL JSON FORMATTING RULES:
 - Arrays must be explicitly listed: [1, 2, 3] not (some_variable)
 - If you don't know specific IDs, omit the parameter entirely
 
+HANDLING "TOP N" QUERIES:
+When asked to "filter to top N" or "show top N companies":
+1. First compute_summary_stats with group_by to get aggregated values
+2. Then use filter_data to select specific companies if needed
+3. Do NOT try to use sort_data or similar - it doesn't exist
+4. For "top 10 by metric", just show all data with compare_companies or plot_trend
+
 EXAMPLE WORKFLOWS:
 
 Query: "Filter to companies 1-5, calculate profit margins, and plot the trend"
@@ -255,23 +262,28 @@ Plan:
   ]
 }
 
-Query: "Show top companies by revenue"
-WRONG (uses variables):
+Query: "Calculate profit margins for all companies, filter to top 10, show comparison chart"
+Plan:
 {
   "steps": [
+    {
+      "action": "compute_margin",
+      "numerator": "net_income",
+      "denominator": "revenue",
+      "output_col": "profit_margin"
+    },
     {
       "action": "filter_data",
-      "conditions": [{"column": "company_id", "operator": "in", "value": (top_companies)}]
-    }
-  ]
-}
-
-CORRECT (omits unknown IDs):
-{
-  "steps": [
+      "conditions": [{"column": "year", "operator": "==", "value": 2023}]
+    },
+    {
+      "action": "compare_companies",
+      "metric": "profit_margin",
+      "year": 2023
+    },
     {
       "action": "compute_summary_stats",
-      "columns": ["revenue"],
+      "columns": ["profit_margin"],
       "group_by": "company_id"
     }
   ]
@@ -456,6 +468,12 @@ def create_plan(
                     f"Error: {e}"
                 )
 
+            # DEBUG: Print the plan before validation
+            print("=" * 70)
+            print("GENERATED PLAN:")
+            print(json.dumps(plan, indent=2))
+            print("=" * 70)
+
             # Validate plan structure
             _validate_plan(plan)
 
@@ -608,6 +626,14 @@ def _validate_step(
     }
 
     if action not in required_params:
+        # Special handling for common mistakes
+        if action == "sort_data":
+            raise ValueError(
+                f"Step {step_num}: 'sort_data' action doesn't exist. "
+                f"For 'top N' queries, use compute_summary_stats with group_by instead. "
+                f"Or simply filter to a specific year and use compare_companies."
+            )
+
         raise ValueError(
             f"Step {step_num}: Unknown action '{action}'. "
             f"Available: {list(required_params.keys())}"
@@ -646,8 +672,10 @@ def _validate_step(
                         f"Remove this filter or provide company IDs."
                     )
 
-    # Validate metric names
-    _validate_metrics_in_step(step, created_columns)
+    # ONLY validate metrics for actions that actually need existing columns
+    # Skip validation for filter_data and export_table since they work with any columns
+    if action not in ["filter_data", "export_table"]:
+        _validate_metrics_in_step(step, created_columns)
 
 
 def _validate_metrics_in_step(step: Dict[str, Any], created_columns: Set[str]) -> None:
@@ -657,39 +685,33 @@ def _validate_metrics_in_step(step: Dict[str, Any], created_columns: Set[str]) -
     output_columns = []  # Columns being created, not consumed
 
     # Collect all metric references (inputs)
-    if "metric" in step:
+    if "metric" in step and step["metric"] is not None:
         metrics_to_check.append(step["metric"])
 
-    if "metrics" in step:
-        metrics_to_check.extend(step["metrics"])
+    if "metrics" in step and step["metrics"] is not None:
+        metrics_to_check.extend([m for m in step["metrics"] if m is not None])
 
-    if "columns" in step:
-        metrics_to_check.extend(step["columns"])
+    if "columns" in step and step["columns"] is not None:
+        metrics_to_check.extend([c for c in step["columns"] if c is not None])
 
-    if "numerator" in step:
+    if "numerator" in step and step["numerator"] is not None:
         metrics_to_check.append(step["numerator"])
 
-    if "denominator" in step:
+    if "denominator" in step and step["denominator"] is not None:
         metrics_to_check.append(step["denominator"])
 
-    if "value_col" in step:
+    if "value_col" in step and step["value_col"] is not None:
         metrics_to_check.append(step["value_col"])
 
-    if "total_col" in step:
+    if "total_col" in step and step["total_col"] is not None:
         metrics_to_check.append(step["total_col"])
 
-    if "group_by" in step:
+    if "group_by" in step and step["group_by"] is not None:
         metrics_to_check.append(step["group_by"])
 
     # Collect output columns (being created, not validated)
-    if "output_col" in step:
+    if "output_col" in step and step["output_col"] is not None:
         output_columns.append(step["output_col"])
-
-    # Also check filter conditions
-    if "conditions" in step:
-        for condition in step["conditions"]:
-            if "column" in condition:
-                metrics_to_check.append(condition["column"])
 
     # Validate each INPUT metric (not output columns)
     for metric in metrics_to_check:
@@ -708,6 +730,13 @@ def _validate_metric(metric: str, created_columns: Set[str]) -> None:
     Raises:
         ValueError: If metric not in available metrics and not created
     """
+    # Handle None or empty metric
+    if metric is None or metric == "":
+        raise ValueError("Metric cannot be None or empty string")
+
+    # Convert to string if not already (safety check)
+    metric = str(metric)
+
     # Check if metric exists in base metrics or was created
     if metric in AVAILABLE_METRICS or metric in created_columns:
         return

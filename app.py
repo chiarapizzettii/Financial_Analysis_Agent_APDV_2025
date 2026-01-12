@@ -342,70 +342,6 @@ if user_input:
                     }
                 )
 
-                # Add prominent "Download Report" button after results
-                st.markdown("---")
-                st.markdown("### 📄 Generate PDF Report")
-                st.info(
-                    "💡 Click the button below to generate a comprehensive PDF report with all visualizations, tables, and data."
-                )
-
-                col1, col2, col3 = st.columns([1, 2, 1])
-
-                with col2:
-                    if st.button(
-                        "📥 Generate & Download PDF Report",
-                        use_container_width=True,
-                        type="primary",
-                        key="download_report_main",
-                    ):
-                        with st.spinner(
-                            "🔄 Generating PDF report... This may take a few seconds."
-                        ):
-                            from src.tools.reporting import generate_report_from_state
-
-                            try:
-                                report_path = generate_report_from_state(
-                                    state=result.state,
-                                    user_query=user_input,
-                                    output_dir="outputs",
-                                )
-
-                                st.success(f"✅ Report generated successfully!")
-                                st.markdown(f"**File location:** `{report_path}`")
-
-                                # Provide download link
-                                with open(report_path, "rb") as f:
-                                    pdf_data = f.read()
-
-                                st.download_button(
-                                    label="💾 Download PDF File",
-                                    data=pdf_data,
-                                    file_name=Path(report_path).name,
-                                    mime="application/pdf",
-                                    use_container_width=True,
-                                    type="primary",
-                                    key="download_pdf_file",
-                                    help=f"Download {Path(report_path).name}",
-                                )
-
-                                st.info(
-                                    f"📂 The report has been saved to: `{report_path}`"
-                                )
-                                st.markdown(
-                                    "👆 Click the button above to download, or find it in the outputs folder."
-                                )
-
-                            except Exception as e:
-                                st.error(f"❌ Report generation failed: {str(e)}")
-
-                                import traceback
-
-                                with st.expander("Show Error Details"):
-                                    st.code(traceback.format_exc())
-
-                # Clear input for next query
-                st.session_state.query_counter += 1
-
             else:
                 st.markdown(
                     f'<div class="error-box">❌ <b>Execution failed:</b> {result.error_type}</div>',
@@ -433,6 +369,69 @@ if user_input:
 
             with st.expander("Show Traceback"):
                 st.code(traceback.format_exc())
+
+
+# ============================================================
+# Report Generation Section - OUTSIDE if user_input block
+# ============================================================
+
+# Add prominent "Download Report" button after results
+if st.session_state.last_state is not None:
+    st.markdown("---")
+    st.markdown("### 📄 Generate PDF Report")
+    st.info(
+        "💡 Click the button below to generate a comprehensive PDF report with all visualizations, tables, and data."
+    )
+
+    col1, col2, col3 = st.columns([1, 2, 1])
+
+    with col2:
+        if st.button(
+            "📥 Generate & Download PDF Report",
+            use_container_width=True,
+            type="primary",
+            key="download_report_main",
+        ):
+            with st.spinner("📄 Generating PDF report... This may take a few seconds."):
+                from src.tools.reporting import generate_report_from_state
+
+                try:
+                    report_path = generate_report_from_state(
+                        state=st.session_state.last_state,
+                        user_query=st.session_state.last_query,
+                        output_dir="outputs",
+                    )
+
+                    st.success(f"✅ Report generated successfully!")
+                    st.markdown(f"**File location:** `{report_path}`")
+
+                    # Provide download link
+                    with open(report_path, "rb") as f:
+                        pdf_data = f.read()
+
+                    st.download_button(
+                        label="💾 Download PDF File",
+                        data=pdf_data,
+                        file_name=Path(report_path).name,
+                        mime="application/pdf",
+                        use_container_width=True,
+                        type="primary",
+                        key="download_pdf_file",
+                        help=f"Download {Path(report_path).name}",
+                    )
+
+                    st.info(f"📂 The report has been saved to: `{report_path}`")
+                    st.markdown(
+                        "👆 Click the button above to download, or find it in the outputs folder."
+                    )
+
+                except Exception as e:
+                    st.error(f"❌ Report generation failed: {str(e)}")
+
+                    import traceback
+
+                    with st.expander("Show Error Details"):
+                        st.code(traceback.format_exc())
 
 
 # ============================================================
@@ -530,7 +529,7 @@ with st.sidebar:
             help="Generate PDF from last analysis",
         ):
             if st.session_state.last_state:
-                with st.spinner("🔄 Generating PDF..."):
+                with st.spinner("📄 Generating PDF..."):
                     from src.tools.reporting import generate_report_from_state
 
                     # Get the last query from history
