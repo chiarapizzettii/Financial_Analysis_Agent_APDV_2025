@@ -1,17 +1,24 @@
-# Financial Analysis Agent 📊
+# 📊 Financial Analysis Agent 
+### *Authors: Paul Prata Leal, Chiara Pizzetti, Karina Trelles*
 
-AI-powered financial data analysis agent using Mistral LLM via Ollama. Query financial data using natural language and get comprehensive analysis with visualizations.
+An AI-powered agent for financial data analysis using natural language queries.
+Users can ask questions such as: *"Calulate Profit margins and show the trend over time"*
 
-## Features
+The system:
+1. creates a multi-step execution plan,
+2. applies the operations to the data,
+3. generates charts and reports.
 
-- 🤖 **Natural Language Interface**: Ask questions in plain English
-- 🔄 **Sequential Multi-Step Execution**: Plans break down into logical steps with state management
-- 📊 **Automated Visualizations**: Revenue trends, profitability ratios, comparative analysis
-- 🧠 **Intelligent Planning**: Mistral LLM creates optimal execution plans
-- ✅ **Robust Validation**: Verifies data quality before operations
-- 📄 **PDF Report Generation**: Professional reports with analysis and visualizations
-- 📈 **Interactive Dashboard**: Streamlit-based UI with chat interface
-- 🛠️ **Extensible Tools**: Modular plotting and calculation functions
+The project uses **Mistral via Ollama** as the LLM and a **Streamlit** interface for interaction.
+
+## Main Features
+
+- Natural Language Interface
+- Multi-step planning and execution
+- Automatic visualizations (trends, comparisons, correlations)
+- PDF report generation
+- Interactive Streamlit dashboard
+- Export results to CSV / Excel
 
 ## Architecture Overview
 
@@ -52,26 +59,24 @@ User Query → Planner → Multi-Step Plan → Sequential Executor → Results
 
 ```
 .
-├── agent/                  # Agent core logic
-│   ├── orchestrator.py     # Main orchestrator
-│   ├── planner.py          # LLM-based planning
-│   └── executor.py         # Tool execution with state management
-├── tools/                  # Analysis tools
-│   ├── visualization.py    # Plotly visualizations
-│   ├── tool_mapping.py     # Tool registry
-│   ├── reporting.py        # PDF report generation
-│   └── analysis.py         # Financial calculations
-├── scripts/               # Setup scripts
-│   └── clean_dataset.py   # Data preprocessing
-├── data/                  # Data directory
-│   ├── processed.csv      # Processed data
-│   └── raw.csv            # Raw CSV data
-└── app.py                 # Streamlit app
+├── agent/                  
+│   ├── orchestrator.py     
+│   ├── planner.py          
+│   └── executor.py         
+├── tools/                  
+│   ├── visualization.py    
+│   ├── tool_mapping.py     
+│   ├── reporting.py        
+│   └── analysis.py        
+├── scripts/               
+│   └── clean_dataset.py   
+├── data/                  
+│   ├── processed.csv      
+│   └── raw.csv            
+└── app.py                 
 ```
 
-## Setup
-
-### Prerequisites
+### Requirements
 
 - Python 3.12+
 - Ollama
@@ -127,7 +132,7 @@ Then open your browser to `http://localhost:8501`
 python -m src.agent.orchestrator
 ```
 
-### Programmatic Usage
+### Example Queries
 
 #### Simple Query
 ```python
